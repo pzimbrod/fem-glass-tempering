@@ -65,8 +65,8 @@ thermal_prob = ThermalProblem(mesh_path=mesh_path,dt=dt,degree=poly_degree)
 mech_prob = ViscoElasticProblem(mesh_path=mesh_path,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
 visco_model = ViscoElasticModel(prob=mech_prob,parameters=visco_params)
 
-#print(type(visco_model.compute_Tf_current(T_current=thermal_prob.T_current,dt=thermal_prob.dt)))
-#print(type(visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)))
+print(type(visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)))
+print(type(visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)))
 print(type(visco_model.stress_tensor))
 
 initial_temp = 873.0
