@@ -362,7 +362,6 @@ class ViscoElasticModel:
         k = 0.0
         for (k_n,lambda_k_n) in zip(k_n_tableau,lambda_k_n_tableau):
             k += k_n * ufl.exp( - t/lambda_k_n)
-        return k
         
     def write_initial_output2(self, output_name: str, t: float = 0.0) -> None:
         self.xdmf2 = io.XDMFFile(self.mesh.comm, f"{output_name}.xdmf", "w")

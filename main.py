@@ -70,6 +70,9 @@ visco_model = ViscoElasticModel(prob=mech_prob,parameters=visco_params)
 initial_temp = 873.0
 thermal_prob.set_initial_condition(initial_temp)
 thermal_prob.setup_weak_form(parameters=model_params)
+print(type(thermal_prob.setup_weak_form(parameters=model_params)))
+print(type(thermal_prob.T_current))
+
 thermal_prob.write_initial_output(output_name="diffusion")
 thermal_prob.setup_solver()
 
