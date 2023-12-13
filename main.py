@@ -10,7 +10,7 @@ dt = (t_end - t_start) / n_steps
 t = t_start
 
 # Triangulation and Finite element
-mesh_path = "glass_heat/mesh1d.msh"
+mesh_path = "mesh1d.msh"
 def create_geometry(path: str):
     gmsh.initialize()
     gmsh.model.add("Glass 1D mesh")
@@ -43,7 +43,7 @@ create_geometry(path=mesh_path)
 #mesh, cell_tags, facet_tags = gmshio.read_from_msh("glass_heat/untitled.msh", MPI.COMM_WORLD, 0, gdim=1)
 #mesh, cell_tags, facet_tags = gmshio.read_from_msh(mesh_path, MPI.COMM_WORLD, 0, gdim=1)
 
-poly_degree = 2
+poly_degree = 1
 
 model_params = {
     "f": 0.0,
@@ -62,17 +62,23 @@ visco_params = {
 }
 
 thermal_prob = ThermalProblem(mesh_path=mesh_path,dt=dt,degree=poly_degree)
-mech_prob = ViscoElasticProblem(mesh_path=mesh_path,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
+mech_prob = ViscoElasticProblem(mesh=thermal_prob.mesh,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
 visco_model = ViscoElasticModel(prob=mech_prob,parameters=visco_params)
 
-#print(type(visco_model.compute_Tf_current(T_current=thermal_prob.T_current,dt=thermal_prob.dt)))
-#print(type(visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)))
+visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)
+print(type(visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)))
+visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)
+print(type(visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)))
 print(type(visco_model.stress_tensor))
+visco_model._assign_values()
 
 initial_temp = 873.0
 thermal_prob.set_initial_condition(initial_temp)
-
+print(type(thermal_prob.set_initial_condition(initial_temp)))
 thermal_prob.setup_weak_form(parameters=model_params)
+print(type(thermal_prob.setup_weak_form(parameters=model_params)))
+print(type(thermal_prob.T_current))
+
 thermal_prob.write_initial_output(output_name="diffusion")
 
 thermal_prob.setup_solver()

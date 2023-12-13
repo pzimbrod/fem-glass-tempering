@@ -18,9 +18,8 @@ from math import factorial
 
 
 class ViscoElasticProblem:
-    def __init__(self, mesh_path, dt, degree=1, tensor_degree=1) -> None:
-        self.mesh, cell_tags, facet_tags = gmshio.read_from_msh(
-            mesh_path, MPI.COMM_WORLD, 0, gdim=1)
+    def __init__(self, mesh, dt, degree=1, tensor_degree=1) -> None:
+        self.mesh = mesh
         self.fe = FiniteElement("P", self.mesh.ufl_cell(), degree)
         self.tfe = TensorElement("P", self.mesh.ufl_cell(), tensor_degree)
         self.fs = FunctionSpace(mesh=self.mesh, element=self.fe)
@@ -82,8 +81,10 @@ class ViscoElasticModel:
         # weighting coefficient for temperature and structural energies, c.f. Nielsen et al. eq. 8
         self.chi = 0.5
         self.dt = prob.dt
-        self.Tf_next = Function(prob.fs)
-        self.Tf_current = Function(prob.fs)
+        self.fss= prob.fs
+        self.tfss= prob.tfs
+        self.Tf_next = Function(self.fss)
+        self.Tf_current = Function(self.fss)
         
         self.m_n_tableau = np.array([
             5.523e-2,
@@ -138,20 +139,20 @@ class ViscoElasticModel:
         
         # Intermediate functions
         # Fictive temperature
-        self.Tf_partial_next = [Function(prob.fs) for _ in range(0,self.m_n_tableau.size)]
-        self.Tf_partial_current = [Function(prob.fs) for _ in range(0,self.m_n_tableau.size)]
+        self.Tf_partial_next = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
+        self.Tf_partial_current = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
         # Deviatoric stress (tensor)
-        self.s_partial_next = [Function(prob.tfs) for _ in range(0,self.g_n_tableau.size)]
-        self.s_partial_current = [Function(prob.tfs) for _ in range(0,self.g_n_tableau.size)]
-        self.ds_partial = [Function(prob.tfs) for _ in range(0,self.g_n_tableau.size)]
-        self.deviatoric_part = [Function(prob.tfs) for _ in range(0,self.g_n_tableau.size)]
+        self.s_partial_next = [Function(self.tfss) for _ in range(0,self.g_n_tableau.size)]
+        self.s_partial_current = [Function(self.tfss) for _ in range(0,self.g_n_tableau.size)]
+        self.ds_partial = [Function(self.tfss) for _ in range(0,self.g_n_tableau.size)]
+        self.deviatoric_part = [Function(self.tfss) for _ in range(0,self.g_n_tableau.size)]
         # Hydrostatic stress (scalar)
-        self.sigma_partial_next = [Function(prob.fs) for _ in range(0,self.m_n_tableau.size)]
-        self.sigma_partial_current = [Function(prob.fs) for _ in range(0,self.m_n_tableau.size)]
-        self.dsigma_partial = [Function(prob.fs) for _ in range(0,self.m_n_tableau.size)]
-        self.hydrostatic_part = [Function(prob.fs) for _ in range(0,self.m_n_tableau.size)]
+        self.sigma_partial_next = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
+        self.sigma_partial_current = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
+        self.dsigma_partial = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
+        self.hydrostatic_part = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
         # Total stress (tensor)
-        self.stress_tensor = Function(prob.tfs)        
+        self.stress_tensor = Function(self.tfss)        
 
     def compute_Tf_next(self,T_current,dt):
         #self.Tf_next.interpolate(self._Tf_current(T_current,dt))
@@ -173,8 +174,8 @@ class ViscoElasticModel:
         C.f. Nielsen et al., eq. 26
         """
         # Reset for accumulation
-        self.Tf_next = np.dot(self._Tf_partial_next(T_current,dt,self._phi_v(T_current)),self.m_n_tableau)
-        return self.Tf_next
+        Tf_expression = Expression(np.dot(self._Tf_partial_next(T_current,dt,self._phi_v(T_current)),self.m_n_tableau), self.fss.element.interpolation_points())
+        return self.Tf_next.interpolate(Tf_expression)
 
     def _phi_v(self, T_current):
         """
@@ -188,34 +189,34 @@ class ViscoElasticModel:
             )
         )
 
-    def _eps_th(self):
+    def _eps_th(self,T_current,T_previous):
         """
         Thermal strain tensor, c.f. Nielsen et al., eq. 9
         """
         return self.I * (
-            self.alpha_solid * (self.Tf_next - self.Tf_current)
+            self.alpha_solid * (T_current - T_previous)
             - (self.alpha_liquid - self.alpha_solid) * (self.Tf_next - self.Tf_current)
             )
     
-    def _strain_increment_tensor(self):
+    def _strain_increment_tensor(self, T_current,T_previous):
         """
         The total strain tensor. In absence of mechanical loads, this is trivially given.
         C.f. Nielsen et al., eq. 28
         """
-        return -self._eps_th()
+        return -self._eps_th(T_current,T_previous)
 
-    def _eps_dev(self):
+    def _eps_dev(self, T_current,T_previous):
         """
         The Deviatoric strain increment tensor, c.f. Nielsen et al., eq. 29
         """
-        eps = self._strain_increment_tensor()
+        eps = self._strain_increment_tensor(T_current,T_previous)
         return eps - 1. / 3 * ufl.tr(eps) * self.I
     
-    def _phi(self,T):
+    def _phi(self,T_current):
         """
         The shift function, c.f. Nielsen et al., eq. 5
         """
-        return ufl.exp(self.H / self.Rg * (1.0 / self.Tb - 1.0 / T))
+        return ufl.exp(self.H / self.Rg * (1.0 / self.Tb - 1.0 / T_current))
 
     def _dxi(self,T_current,T_previous):
         """
@@ -242,7 +243,7 @@ class ViscoElasticModel:
         """
         The partial deviatoric stress increment at previous time, c.f. Nielsen et al., eq. 15a
         """
-        self.ds_partial = 2.0 * self.g_n_tableau * self._eps_dev()/self._dxi(T_current,T_previous) * self.lambda_g_n_tableau \
+        self.ds_partial = 2.0 * self.g_n_tableau * self._eps_dev(T_current,T_previous)/self._dxi(T_current,T_previous) * self.lambda_g_n_tableau \
                                     * self._taylor_exponential(T_current,T_previous,"g")
         return self.ds_partial
      
@@ -250,7 +251,7 @@ class ViscoElasticModel:
         """
         The partial hydrostatic stress increment at previous time, c.f. Nielsen et al., eq. 15b
         """
-        self.dsigma_partial = self.k_n_tableau * self._strain_increment_tensor()/self._dxi(T_current,T_previous) * self.lambda_k_n_tableau \
+        self.dsigma_partial = self.k_n_tableau * self._strain_increment_tensor(T_current,T_previous)/self._dxi(T_current,T_previous) * self.lambda_k_n_tableau \
                                     * self._taylor_exponential(T_current,T_previous,"k")
         return self.dsigma_partial
 
@@ -286,8 +287,8 @@ class ViscoElasticModel:
         """
         The total stress tensor at current time, c.f. Nielsen et al., eq. 18 
         """
-        self.stress_tensor = ((sum(self._deviatoric_part(T_current,T_previous)) + self.I * sum(self._hydrostatic_part(T_current,T_previous))))
-        return self.stress_tensor
+        stress_expression = Expression((sum(self._deviatoric_part(T_current,T_previous)) + self.I * sum(self._hydrostatic_part(T_current,T_previous))), self.tfss.element.interpolation_points())
+        return self.stress_tensor.interpolate(stress_expression)
 
     def _M(self,scaled_time):
         """
@@ -321,3 +322,8 @@ class ViscoElasticModel:
         for (k_n,lambda_k_n) in zip(k_n_tableau,lambda_k_n_tableau):
             k += k_n * ufl.exp( - t/lambda_k_n)
         return k
+
+    def _assign_values(self):
+        self.Tf_partial_current[:][:] = self.Tf_partial_next[:][:]
+        self.s_partial_current[:][:] = self.s_partial_next[:][:]
+        self.sigma_partial_current[:][:] = self.sigma_partial_next[:][:]

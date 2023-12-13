@@ -2,6 +2,7 @@ from dolfinx.mesh import create_interval, locate_entities_boundary
 from mpi4py import MPI
 from dolfinx.mesh import locate_entities_boundary
 from dolfinx import fem, io, plot, nls, log
+from dolfinx.nls import petsc
 from dolfinx.io import gmshio
 from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc, 
                         locate_dofs_geometrical, form, locate_dofs_topological ,
@@ -75,7 +76,7 @@ class ThermalProblem:
     def setup_solver(self) -> None:
         self.prob = fem.petsc.NonlinearProblem(self.F,self.T_current)
 
-        self.solver = nls.petsc.NewtonSolver(self.mesh.comm, self.prob)
+        self.solver = petsc.NewtonSolver(self.mesh.comm, self.prob)
         self.solver.convergence_criterion = "incremental"
         self.solver.rtol = 1e-12
         self.solver.report = True
@@ -96,7 +97,7 @@ class ThermalProblem:
         self.T_previous.x.array[:] = self.T_current.x.array[:]
 
         # Write solution to file
-        self.xdmf.write_function(self.T_current, t)
+        #self.xdmf.write_function(self.T_current, t)
     
     def finalize(self) -> None:
         self.xdmf.close()
