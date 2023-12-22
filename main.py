@@ -5,7 +5,7 @@ from ViscoElasticProblem import ViscoElasticProblem, ViscoElasticModel
 # Time domain
 t_start = 0.0
 t_end = 1.0
-n_steps = 101
+n_steps = 100
 dt = (t_end - t_start) / n_steps
 t = t_start
 
@@ -50,7 +50,8 @@ model_params = {
     "epsilon": 0.93,
     "sigma": 5.670e-8,
     "T_0": 600.0,
-    "alpha": 0.0005
+    "alpha": 0.0005,
+    "htc": 200
 }
 
 visco_params = {
@@ -59,30 +60,21 @@ visco_params = {
     "Rg": 8.314,
     "alpha_solid": 9.10e-6,
     "alpha_liquid": 25.10e-6,
+    "Tf_init": 873.0,
 }
 
 thermal_prob = ThermalProblem(mesh_path=mesh_path,dt=dt,degree=poly_degree)
 mech_prob = ViscoElasticProblem(mesh=thermal_prob.mesh,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
 visco_model = ViscoElasticModel(prob=mech_prob,parameters=visco_params)
 
-visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)
-print(type(visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)))
-visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)
-print(type(visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous)))
-print(type(visco_model.stress_tensor))
-visco_model._assign_values()
-
 initial_temp = 873.0
 thermal_prob.set_initial_condition(initial_temp)
-print(type(thermal_prob.set_initial_condition(initial_temp)))
 thermal_prob.setup_weak_form(parameters=model_params)
-print(type(thermal_prob.setup_weak_form(parameters=model_params)))
-print(type(thermal_prob.T_current))
-
 thermal_prob.write_initial_output(output_name="diffusion")
-
 thermal_prob.setup_solver()
 
+visco_model.set_initial_condition_Tf(initial_temp)
+visco_model.write_initial_output2(output_name="visco", t=t)
 # Parameters
 #alpha = Constant(mesh,ScalarType(0.0))
 #alpha = Constant(mesh,ScalarType(0.005))
@@ -102,6 +94,9 @@ for i in range(n_steps):
     t += dt
 
     thermal_prob.solve(t=t)
+    visco_model.solve_visco(t=t)
+    visco_model.compute_Tf_current(T_current=thermal_prob.T_current,dt=thermal_prob.dt)
+    visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous,dt=thermal_prob.dt)
     """
     if postprocess:
         error = form((T_current)**2 * dx)
@@ -115,5 +110,7 @@ for i in range(n_steps):
         if mesh.comm.rank == 0:
             print(f"Emitted heat: {Q}")
     """
-
 thermal_prob.finalize()
+visco_model.finalize2()
+
+#try to delete previous things and renovate it for each function

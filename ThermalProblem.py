@@ -97,7 +97,7 @@ class ThermalProblem:
         self.T_previous.x.array[:] = self.T_current.x.array[:]
 
         # Write solution to file
-        #self.xdmf.write_function(self.T_current, t)
+        self.xdmf.write_function(self.T_current, t)
     
     def finalize(self) -> None:
         self.xdmf.close()
