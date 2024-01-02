@@ -167,7 +167,6 @@ class ViscoElasticModel:
         self.hydrostatic_part = [Function(self.fss) for _ in range(0,self.m_n_tableau.size)]
         # Total stress (tensor)
         self.stress_tensor = Function(self.tfss)
-        #self.stress_tensor_previous = Function(self.tfss)
         
     def set_initial_condition_Tf(self, fict_temp_value: float) -> None:
         """
