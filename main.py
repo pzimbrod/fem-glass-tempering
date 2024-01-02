@@ -51,6 +51,7 @@ model_params = {
     "Rg": 8.314,
     "alpha_solid": 9.10e-6,
     "alpha_liquid": 25.10e-6,
+    "Tf_init": 873.0,
 }
 
 model = ThermoViscoProblem(mesh_path=mesh_path,config=fe_config,
