@@ -298,8 +298,8 @@ class ViscoElasticModel:
         The partial deviatoric stress increment at current time, c.f. Nielsen et al., eq. 16a
         Returns:numpy.ndarray
         """
-        self.s_partial_current = self._ds_partial(T_current,T_previous,dt) * self._taylor_exponential(T_current,T_previous,"g",dt)
-        return self.s_partial_current
+        self.s_partial_next = self._ds_partial(T_current,T_previous,dt) * self._taylor_exponential(T_current,T_previous,"g",dt)
+        return self.s_partial_next
 
     def _sigma_partial_next(self,T_current,T_previous,dt):
         """
