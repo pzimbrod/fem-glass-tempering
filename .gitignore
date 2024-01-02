@@ -160,4 +160,9 @@ cython_debug/
 #.idea/
 
 *.msh
-
+*.h5
+**/*.h5
+*.vtk
+**/*.vtk
+*.xdmf
+**/*.xdmf
