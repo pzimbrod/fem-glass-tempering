@@ -95,7 +95,7 @@ for i in range(n_steps):
 
     thermal_prob.solve(t=t)
     visco_model.solve_visco(t=t)
-    visco_model.compute_Tf_current(T_current=thermal_prob.T_current,dt=thermal_prob.dt)
+    visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)
     visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous,dt=thermal_prob.dt)
     """
     if postprocess:
