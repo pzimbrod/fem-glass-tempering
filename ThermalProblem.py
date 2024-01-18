@@ -24,7 +24,8 @@ class ThermalProblem:
         self.T_current = Function(self.fs)       # For nonlinear problems, there is no TrialFunction
         self.T_current.name = "Temperature"
         self.v = TestFunction(self.fs)
-        self.T_previous = Function(self.fs)      # previous time step
+        self.T_previous = Function(self.fs) # previous time step
+        self.T_next = Function(self.fs) 
         self.dt = dt
 
     def set_initial_condition(self, temp_value: float) -> None:
@@ -50,10 +51,15 @@ class ThermalProblem:
     def setup_weak_form(self,parameters: dict) -> None:
         # Right hand side
         f = Constant(self.mesh,ScalarType(parameters["f"]))
-        epsilon = Constant(self.mesh,ScalarType(parameters["epsilon"]))
-        sigma = Constant(self.mesh,ScalarType(parameters["sigma"]))
-        T_0 = Constant(self.mesh, ScalarType(parameters["T_0"]))
+        epsilon = Constant(self.mesh,ScalarType(parameters["epsilon"])) # view factor
+        sigma = Constant(self.mesh,ScalarType(parameters["sigma"])) # Stefan Boltzmann constant - W/m^2K^4 
+        T_0 = Constant(self.mesh, ScalarType(parameters["T_0"]))    # ambient temperature - K
         alpha = Constant(self.mesh,ScalarType(parameters["alpha"]))
+        htc = Constant(self.mesh,ScalarType(parameters["htc"]))     # heat convective coefficent - W/(m^2*K) 
+        rho = Constant(self.mesh, ScalarType(parameters["rho"]))    # density kg/m^3
+        cp = Constant(self.mesh,ScalarType(parameters["cp"]))       # specific heat - J/(kg*K)
+        k = Constant(self.mesh,ScalarType(parameters["k"]))         # thermal conductivity - W/(m*K) 
+
 
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
@@ -63,13 +69,13 @@ class ThermalProblem:
             (self.T_current - self.T_previous) * self.v * dx
             + self.dt * (
             # Laplacian
-            - alpha * dot(grad(self.T_current),grad(self.v)) * dx
+            + (k/rho*cp) * dot(grad(self.T_current),grad(self.v)) * dx
             # Right hand side
-            - f * self.v * dx
+            - (f/rho*cp) * self.v * dx
             # Radiation
-            + sigma * epsilon * (self.T_current**4 - T_0**4) * self.v * ds
+            + ((sigma * epsilon)/(rho*cp)) * (self.T_current**4 - T_0**4) * self.v * ds
             # Convection
-            + 0.1 * (self.T_current - T_0) * self.v * ds
+            + (htc/(rho*cp)) * (self.T_current - T_0) * self.v * ds
             )
         )
     
@@ -95,6 +101,7 @@ class ThermalProblem:
 
         # Update solution at previous time step (u_n)
         self.T_previous.x.array[:] = self.T_current.x.array[:]
+
 
         # Write solution to file
         self.xdmf.write_function(self.T_current, t)

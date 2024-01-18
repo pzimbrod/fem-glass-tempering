@@ -1,12 +1,15 @@
 import gmsh
 from ThermalProblem import ThermalProblem
-from ViscoElasticProblem import ViscoElasticProblem, ViscoElasticModel
+from ViscoElasticProblem import ViscoElasticModel
+from math import ceil
 
 # Time domain
 t_start = 0.0
-t_end = 1.0
-n_steps = 100
-dt = (t_end - t_start) / n_steps
+t_end = 10.0
+
+#dt = (t_end - t_start) / n_steps
+dt = 0.1
+n_steps = ceil((t_end - t_start) / dt)
 t = t_start
 
 # Triangulation and Finite element
@@ -49,14 +52,17 @@ model_params = {
     "f": 0.0,
     "epsilon": 0.93,
     "sigma": 5.670e-8,
-    "T_0": 600.0,
+    "T_0": 600.15,
     "alpha": 0.0005,
-    "htc": 200
+    "htc": 280.1,
+    "rho": 2500.0,
+    "cp": 1433.0,
+    "k": 1,
 }
 
 visco_params = {
-    "H": 22.380e3,
-    "Tb": 779.9e0,
+    "H": 457.05e3,
+    "Tb": 869.0e0,
     "Rg": 8.314,
     "alpha_solid": 9.10e-6,
     "alpha_liquid": 25.10e-6,
@@ -64,8 +70,8 @@ visco_params = {
 }
 
 thermal_prob = ThermalProblem(mesh_path=mesh_path,dt=dt,degree=poly_degree)
-mech_prob = ViscoElasticProblem(mesh=thermal_prob.mesh,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
-visco_model = ViscoElasticModel(prob=mech_prob,parameters=visco_params)
+#mech_prob = ViscoElasticProblem(mesh=thermal_prob.mesh,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
+visco_model = ViscoElasticModel(parameters=visco_params,mesh=thermal_prob.mesh,dt=dt,degree=poly_degree,tensor_degree=poly_degree)
 
 initial_temp = 873.0
 thermal_prob.set_initial_condition(initial_temp)
@@ -74,7 +80,8 @@ thermal_prob.write_initial_output(output_name="diffusion")
 thermal_prob.setup_solver()
 
 visco_model.set_initial_condition_Tf(initial_temp)
-visco_model.write_initial_output2(output_name="visco", t=t)
+visco_model.write_initial_output2(output_name="visco")
+
 # Parameters
 #alpha = Constant(mesh,ScalarType(0.0))
 #alpha = Constant(mesh,ScalarType(0.005))
@@ -95,8 +102,8 @@ for i in range(n_steps):
 
     thermal_prob.solve(t=t)
     visco_model.solve_visco(t=t)
-    visco_model.compute_Tf_next(T_current=thermal_prob.T_current,dt=thermal_prob.dt)
-    visco_model.compute_stress_tensor(T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous,dt=thermal_prob.dt)
+    visco_model.compute_Tf_current(T_current=thermal_prob.T_current,Tf_previous=visco_model.Tf_previous,dt=thermal_prob.dt)
+    visco_model.compute_stress_tensor_next(T_next=thermal_prob.T_next,T_current=thermal_prob.T_current,T_previous=thermal_prob.T_previous,Tf_current=visco_model.Tf_current,Tf_previous=visco_model.Tf_previous,dt=thermal_prob.dt)
     """
     if postprocess:
         error = form((T_current)**2 * dx)
@@ -113,4 +120,3 @@ for i in range(n_steps):
 thermal_prob.finalize()
 visco_model.finalize2()
 
-#try to delete previous things and renovate it for each function
