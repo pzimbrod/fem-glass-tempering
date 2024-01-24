@@ -5,7 +5,7 @@ from math import ceil
 
 # Time domain
 t_start = 0.0
-t_end = 10.0
+t_end = 50.0
 
 #dt = (t_end - t_start) / n_steps
 dt = 0.1
@@ -52,16 +52,16 @@ model_params = {
     "f": 0.0,
     "epsilon": 0.93,
     "sigma": 5.670e-8,
-    "T_0": 600.15,
+    "T_0": 600.0,
     "alpha": 0.0005,
     "htc": 280.1,
     "rho": 2500.0,
     "cp": 1433.0,
-    "k": 1,
+    "k": 1.0,
 }
 
 visco_params = {
-    "H": 457.05e3,
+    "H": 627.8e3,
     "Tb": 869.0e0,
     "Rg": 8.314,
     "alpha_solid": 9.10e-6,
@@ -120,3 +120,4 @@ for i in range(n_steps):
 thermal_prob.finalize()
 visco_model.finalize2()
 
+#with dt only, gives me good results, but still decreasing

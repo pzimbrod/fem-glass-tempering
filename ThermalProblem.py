@@ -52,7 +52,7 @@ class ThermalProblem:
         # Right hand side
         f = Constant(self.mesh,ScalarType(parameters["f"]))
         epsilon = Constant(self.mesh,ScalarType(parameters["epsilon"])) # view factor
-        sigma = Constant(self.mesh,ScalarType(parameters["sigma"])) # Stefan Boltzmann constant - W/m^2K^4 
+        sigma = Constant(self.mesh,ScalarType(parameters["sigma"])) # Stefan Boltzmann constant - W/m^2K^4
         T_0 = Constant(self.mesh, ScalarType(parameters["T_0"]))    # ambient temperature - K
         alpha = Constant(self.mesh,ScalarType(parameters["alpha"]))
         htc = Constant(self.mesh,ScalarType(parameters["htc"]))     # heat convective coefficent - W/(m^2*K) 
@@ -69,13 +69,13 @@ class ThermalProblem:
             (self.T_current - self.T_previous) * self.v * dx
             + self.dt * (
             # Laplacian
-            + (k/rho*cp) * dot(grad(self.T_current),grad(self.v)) * dx
+            + dot(grad(self.T_current),grad(self.v)) * dx
             # Right hand side
-            - (f/rho*cp) * self.v * dx
+            - f * self.v * dx
             # Radiation
-            + ((sigma * epsilon)/(rho*cp)) * (self.T_current**4 - T_0**4) * self.v * ds
+            + 0.001 * (sigma * epsilon) * (self.T_current**4 - T_0**4) * self.v * ds
             # Convection
-            + (htc/(rho*cp)) * (self.T_current - T_0) * self.v * ds
+            + 0.001 * htc * (self.T_current - T_0) * self.v * ds
             )
         )
     

@@ -96,7 +96,7 @@ class ViscoElasticModel:
             9.806e-1,
             7.301e+0,
             1.347e+1,
-            1.900e+1,
+            1.090e+1,
             
         ])
         self.lambda_k_n_tableau = np.array([
@@ -124,8 +124,8 @@ class ViscoElasticModel:
         # Intermediate functions
         # Fictive temperature
         self.Tf_partial_previous = [self.Tf_fss_previous for _ in range(0,self.m_n_tableau.size)]
-        self.Tf_partial_current = [self.Tf_fss_current for _ in range(0,self.m_n_tableau.size)]
-        self.Tf_partial_next = [self.Tf_fss_next for _ in range(0,self.m_n_tableau.size)]
+        self.Tf_partial_current = [self.Tf_fss_previous for _ in range(0,self.m_n_tableau.size)]
+        self.Tf_partial_next = [self.Tf_fss_previous for _ in range(0,self.m_n_tableau.size)]
         
         # Deviatoric stress (tensor)
         self.s_relax_previous = [Function(self.tfs) for _ in range(0,self.g_n_tableau.size)]
@@ -305,8 +305,8 @@ class ViscoElasticModel:
         The partial deviatoric stress increment at previous time, c.f. Nielsen et al., eq. 15a
         Returns:numpy.ndarray
         """
-        self.ds_visco = 2.0 * self.g_n_tableau * (self._eps_dev(T_current,T_previous,Tf_current,Tf_previous))/(self._dxi(T_next,T_current,dt)) * self.lambda_g_n_tableau \
-                                    * self._taylor_exponential(T_next,T_current,"g",dt)
+        self.ds_visco = 2.0 * self.g_n_tableau * (self._eps_dev(T_current,T_previous,Tf_current,Tf_previous)) * self.lambda_g_n_tableau \
+                                    * self._taylor_exponential(T_next,T_current,"g",dt)/(self._dxi(T_next,T_current,dt))
         return self.ds_visco
      
     def _dsigma_visco(self,T_next,T_current,T_previous,Tf_current,Tf_previous,dt):
@@ -314,8 +314,8 @@ class ViscoElasticModel:
         The partial hydrostatic stress increment at previous time, c.f. Nielsen et al., eq. 15b
         Returns:numpy.ndarray
         """
-        self.dsigma_visco = self.k_n_tableau * ufl.tr(self._strain_increment_tensor(T_current,T_previous,Tf_current,Tf_previous))/(self._dxi(T_next,T_current,dt))* self.lambda_k_n_tableau \
-                                    * self._taylor_exponential(T_next,T_current,"k",dt)
+        self.dsigma_visco = self.k_n_tableau * ufl.tr(self._strain_increment_tensor(T_current,T_previous,Tf_current,Tf_previous))* self.lambda_k_n_tableau \
+                                    * self._taylor_exponential(T_next,T_current,"k",dt)/(self._dxi(T_next,T_current,dt))
         return self.dsigma_visco
 
     def _s_relax_next(self,T_next,T_current,T_previous,Tf_current,Tf_previous,dt): 
@@ -401,24 +401,26 @@ class ViscoElasticModel:
         self.Tf_partial_previous[:][:] = self.Tf_partial_current[:][:]
         self.Tf_previous.x.array[:] = self.Tf_current.x.array[:]
         #self.Tf_partial_current = self.Tf_partial_next.copy()
-        #self.s_relax_previous = self.s_relax_current.copy()
+        #self.s_relax_previous[:][:]  = self.s_relax_current[:][:] 
         self.s_relax_current[:][:] = self.s_relax_next[:][:] 
-        #self.sigma_relax_previous= self.sigma_relax_current.copy()
+        #self.sigma_relax_previous[:][:] = self.sigma_relax_current[:][:] 
         self.sigma_relax_current[:][:]  = self.sigma_relax_next[:][:] 
-        #self.Tf_current.x.array[:] = self.Tf_next.x.array[:]
+        self.Tf_current.x.array[:] = self.Tf_next.x.array[:]
         #self.stress_tensor_previous.x.array[:] = self.stress_tensor_current.x.array[:]
         self.stress_tensor_current.x.array[:] = self.stress_tensor_next.x.array[:]
-        #self.hydrostatic_part_previous = self.hydrostatic_part_current.copy()
+        #self.hydrostatic_part_previous[:][:]  = self.hydrostatic_part_current[:][:] 
         self.hydrostatic_part_current[:][:]  = self.hydrostatic_part_next[:][:] 
-        #self.deviatoric_part_previous = self.deviatoric_part_current.copy()
+        #self.deviatoric_part_previous[:][:]  = self.deviatoric_part_current[:][:] 
         self.deviatoric_part_current[:][:]  = self.deviatoric_part_next[:][:] 
         self.T_previous.x.array[:] = self.T_current.x.array[:]
         self.T_current.x.array[:] = self.T_next.x.array[:]
         # Write solution to file
-        #self.xdmf2.write_function(self.Tf_next, t) 
+        #self.xdmf2.write_function(self.Tf_current, t) 
         self.xdmf2.write_function(self.stress_tensor_next, t)
         
     def finalize2(self) -> None:
         self.xdmf2.close()
         
 
+#revise all functions
+#compute untill equiblrium, time loops
