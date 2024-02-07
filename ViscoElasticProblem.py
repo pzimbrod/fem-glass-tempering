@@ -1,7 +1,7 @@
 from dolfinx.mesh import create_interval, locate_entities_boundary
 from mpi4py import MPI
 
-from dolfinx.mesh import locate_entities_boundary
+from dolfinx.mesh import locate_entities_boundary, Mesh
 from dolfinx import fem, io, plot, nls, log
 from dolfinx.io import gmshio
 from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc,
@@ -19,13 +19,17 @@ from math import factorial
 
 
 class ViscoElasticModel:
-    def __init__(self, parameters: dict, mesh, dt, degree=1, tensor_degree=1) -> None:
+    def __init__(self, parameters: dict, mesh: Mesh, dt: float, 
+                 degree: int =1, tensor_degree: int=1,
+                 jit_options: (dict|None) = None ) -> None:
         self.mesh = mesh
         self.fe = FiniteElement("P", self.mesh.ufl_cell(), degree)
         self.tfe = TensorElement("P", self.mesh.ufl_cell(), tensor_degree)
         self.fs = FunctionSpace(mesh=self.mesh, element=self.fe)
         self.tfs = FunctionSpace(mesh=self.mesh, element=self.tfe)
         self.dt = dt
+
+        self.jit_options = jit_options
 
         # For nonlinear problems, there is no TrialFunction
         self.T_current = Function(self.fs)

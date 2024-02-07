@@ -16,7 +16,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class ThermalProblem:
-    def __init__(self,mesh_path,dt,degree=1) -> None:
+    def __init__(self,mesh_path: str,dt: float,degree: int = 1,
+                 jit_options: (dict|None) = None ) -> None:
         self.mesh, cell_tags, facet_tags = gmshio.read_from_msh(mesh_path, MPI.COMM_WORLD, 0, gdim=1)
         self.fe = FiniteElement("P",self.mesh.ufl_cell(),degree)
         self.fs = FunctionSpace(mesh=self.mesh,element=self.fe)
@@ -27,6 +28,7 @@ class ThermalProblem:
         self.T_previous = Function(self.fs) # previous time step
         self.T_next = Function(self.fs) 
         self.dt = dt
+        self.jit_options = jit_options
 
     def set_initial_condition(self, temp_value: float) -> None:
         x = SpatialCoordinate(self.mesh)
@@ -80,7 +82,8 @@ class ThermalProblem:
         )
     
     def setup_solver(self) -> None:
-        self.prob = fem.petsc.NonlinearProblem(self.F,self.T_current)
+        self.prob = fem.petsc.NonlinearProblem(F=self.F,u=self.T_current,
+                                               jit_options=self.jit_options)
 
         self.solver = petsc.NewtonSolver(self.mesh.comm, self.prob)
         self.solver.convergence_criterion = "incremental"
