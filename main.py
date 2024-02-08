@@ -12,18 +12,14 @@ t_start = 0.0
 t_end = 50.0
 time = (0.0, 50.0)
 
-#dt = (t_end - t_start) / n_steps
 dt = 0.1
 t = t_start
 
-# Triangulation and Finite element
 mesh_path = "mesh1d.msh"
 create_new_mesh = False
 
 if create_new_mesh:
     create_mesh(path=mesh_path)
-#mesh, cell_tags, facet_tags = gmshio.read_from_msh("glass_heat/untitled.msh", MPI.COMM_WORLD, 0, gdim=1)
-#mesh, cell_tags, facet_tags = gmshio.read_from_msh(mesh_path, MPI.COMM_WORLD, 0, gdim=1)
 
 fe_config = {
     "T":        {"element": "CG", "degree": 1},
@@ -58,7 +54,8 @@ model_params = {
 }
 
 model = ThermoViscoProblem(mesh_path=mesh_path,config=fe_config,
-                           time=time,dt=dt,model_parameters=model_params)
+                           time=time,dt=dt,model_parameters=model_params,
+                           jit_options=jit_options)
 
 model.setup(dirichlet_bc=False,outfile_name="visco")
 model.solve()

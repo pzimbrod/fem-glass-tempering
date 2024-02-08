@@ -5,16 +5,18 @@ from dolfinx import fem, io, plot, nls, log
 from dolfinx.nls import petsc
 from dolfinx.io import gmshio
 from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc, 
-                        locate_dofs_geometrical, form, locate_dofs_topological ,
+                        locate_dofs_geometrical, form, locate_dofs_topological, Expression,
                         assemble_scalar, VectorFunctionSpace, Expression)
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, NonlinearProblem
 from ufl import (TrialFunction, TestFunction, FiniteElement, TensorElement,
-                 grad, dot, inner, Identity,
+                 VectorElement,grad, dot, inner, Identity, exp,
                  lhs, rhs, Measure, SpatialCoordinate, FacetNormal)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
 import numpy as np
+import ufl
 from math import ceil
+from time import time
 
 class ThermoViscoProblem:
     def __init__(self,mesh_path: str,time: tuple, dt: float,
@@ -23,20 +25,23 @@ class ThermoViscoProblem:
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=1)
         
-        self.__init_function_spaces(config=config)
-        self.__init_functions()
-        self.__init_material_model_constants()
-        self.__init_model_parameters(model_parameters=model_parameters)
-
-
-        self.jit_options = jit_options
-        
         self.dt = dt
         # The time domain
         self.time = time
         # The current timestep
         self.t = self.time[0]
         self.n_steps = ceil((self.time[1] - self.time[0]) / self.dt)
+
+        self.__init_material_model_constants()
+        self.__init_model_parameters(model_parameters=model_parameters)
+        self.__init_function_spaces(config=config)
+        self.__init_functions()
+
+        self.jit_options = jit_options
+
+        return
+
+
 
     def __init_function_spaces(self,config: dict) -> None:
         """
@@ -60,6 +65,7 @@ class ThermoViscoProblem:
         
         return
     
+
     def __init_functions(self) -> None:
         """
         Create all necessary FEniCS functions to model the viscoelastic
@@ -76,6 +82,19 @@ class ThermoViscoProblem:
         # For building the weak form
         self.v = TestFunction(self.fs_T)
 
+        # Shift function
+        self.phi = Function(self.fs_T)
+        self.phi.name = "Shift function"
+
+        # Partial fictive temperatures
+        # Looping through a list causes problems, likely during
+        # JIT and AD
+        self.Tf_partial_previous = np.array([Function(self.fs_T) for i in range(0,self.m_n_tableau.size)],
+                                            dtype=object)
+        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}-th partial fictive temperature") for i in range(0,self.m_n_tableau.size)],
+                                           dtype=object)
+        #self.Tf_partial_current.name = "Partial fictive temperature"
+
         # Fictive temperature
         self.Tf_previous = Function(self.fs_T)
         self.Tf_current = Function(self.fs_T)        
@@ -83,6 +102,7 @@ class ThermoViscoProblem:
 
         return
     
+
     def __init_material_model_constants(self) -> None:
         """
         Define the material model
@@ -142,6 +162,7 @@ class ThermoViscoProblem:
         ])
         return
     
+
     def __init_model_parameters(self,model_parameters: dict) -> None:
         """
         Create all parameters of the viscoelastic model
@@ -180,6 +201,7 @@ class ThermoViscoProblem:
 
         return
     
+
     def setup(self, dirichlet_bc: bool = False,
               outfile_name: str = "visco") -> None:
         self._set_initial_condition(temp_value=self.T_init)
@@ -189,14 +211,48 @@ class ThermoViscoProblem:
         self._setup_weak_form()
         self._setup_solver()
 
+
     def _set_initial_condition(self, temp_value: float) -> None:
+       self.__set_IC_T(temp_value) 
+       self.__set_IC_Tf()
+       self.__set_IC_Tf_partial()
+    
+
+    def __set_IC_T(self, temp_value: float) -> None:
         x = SpatialCoordinate(self.mesh)
         def temp_init(x):
             values = np.full(x.shape[1], temp_value, dtype = ScalarType) 
             return values
         self.T_previous.interpolate(temp_init)
         self.T_current.interpolate(temp_init)
+
+        return
     
+
+    def __set_IC_Tf(self) -> None:
+        """
+        Set the initial condition for fictive temperature.
+        For t0, Tf = T (c.f. Nielsen et al., eq. 27)
+        """
+        self.Tf_previous.x.array[:] = self.T_previous.x.array[:]
+        self.Tf_current.x.array[:] = self.T_current.x.array[:]
+
+        return
+    
+
+    def __set_IC_Tf_partial(self) -> None:
+        """
+        Set the initial condition for the partial fictive temperature
+        values.
+        For t0, Tf(n) = T (c.f. Nielsen et al., eq. 27)
+        """
+        for (previous,current) in zip(self.Tf_partial_previous,self.Tf_partial_current):
+            current.x.array[:] = self.T_current.x.array[:]
+            previous.x.array[:] = self.T_previous.x.array[:]
+
+        return
+    
+
     def _set_dirichlet_bc(self, bc_value: float) -> None:
         fdim = self.mesh.topology.dim - 1
         boundary_facets = locate_entities_boundary(
@@ -204,11 +260,21 @@ class ThermoViscoProblem:
         self.bc = fem.dirichletbc(PETSc.ScalarType(bc_value), 
                                   fem.locate_dofs_topological(self.fs, fdim, boundary_facets), self.fs)
 
+
     def _write_initial_output(self, outfile_name: str, t: float = 0.0) -> None:
-        self.xdmf = io.XDMFFile(self.mesh.comm, f"{outfile_name}.xdmf", "w")
-        self.xdmf.write_mesh(self.mesh)
-        self.xdmf.write_function(self.T_current, t)
-                            
+        self.outfile = io.VTKFile(self.mesh.comm, f"output/{outfile_name}.pvd", "w")
+
+        self.outfile.write_mesh(self.mesh)
+        # Temperature
+        self.outfile.write_function(self.T_current, t)
+        # Shift function
+        self.outfile.write_function(self.phi,t)
+        # Fictive temperature
+        self.outfile.write_function(self.Tf_current, t)
+        self.outfile.write_function([*self.Tf_partial_current], t)
+
+        
+
     def _setup_weak_form(self) -> None:
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
@@ -228,6 +294,7 @@ class ThermoViscoProblem:
             )
         )
     
+
     def _setup_solver(self) -> None:
         self.prob = fem.petsc.NonlinearProblem(F=self.F,u=self.T_current,
                                                jit_options=self.jit_options)
@@ -245,22 +312,117 @@ class ThermoViscoProblem:
         opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
         self.ksp.setFromOptions()
     
-    def solve_timestep(self,t) -> None:
-        n, converged = self.solver.solve(self.T_current)
-        self.T_current.x.scatter_forward()
-
-        # Update solution at previous time step (u_n)
-        self.T_previous.x.array[:] = self.T_current.x.array[:]
-
-
-        # Write solution to file
-        self.xdmf.write_function(self.T_current, t)
-    
-    def solve(self) -> None:
-        for i in range(self.n_steps):
-            self.t += self.dt
-            self.solve_timestep(t=self.t)
+        
+    def _update_values(self,current: Function,previous: Function) -> None:
+        # Update ghost values across processes, relevant for MPI computations
+        current.x.scatter_forward()
+        # assign values
+        previous.x.array[:] = current.x.array[:]
         return
     
-    def finalize(self) -> None:
-        self.xdmf.close()
+
+    def _write_output(self) -> None:
+        self.outfile.write_function(
+            [
+                self.T_current,
+                self.phi,
+                *self.Tf_partial_current,
+                self.Tf_current
+            ],
+            t=self.t
+        )
+    
+
+    def solve_timestep(self,t) -> None:
+        print(f"t={self.t}")
+        self._solve_T()
+        self._solve_Tf()
+        self._write_output()
+    
+
+    def _solve_T(self) -> None:
+        """
+        Solve the heat equation for each time step.
+        Update values and write current values to file.
+        """
+        n, converged = self.solver.solve(self.T_current)
+        self._update_values(current=self.T_current,
+                            previous=self.T_previous)
+        return
+    
+    def _solve_Tf(self) -> None:
+        """
+        Calculate the current fictive temperature,
+        c.f. Nielsen et al., Fig. 5.:
+
+        Steps:
+        - compute shift function `phi`
+        - compute current partial fictive temperatures
+        - compute current fictive temperature
+        """
+        self.__update_shift_function()
+        self.__update_partial_fictive_temperature()
+        self.__update_fictive_temperature()
+        
+        return 
+    
+
+    def __update_shift_function(self) -> None:
+        self.phi.x.array[:] = np.exp(
+            self.H / self.Rg * (
+                1.0 / self.Tb
+                - self.chi / self.T_current.vector
+                - (1.0 - self.chi) / self.Tf_previous.vector
+            )
+        )
+
+        return
+
+    
+    def __update_partial_fictive_temperature(self) -> None:
+        """
+        Update the partial fictive temperature for the current timestep.
+        C.f. Nielsen et al., Eq. 24
+        """        
+        for i in range(0,self.Tf_partial_current.size):
+            self.Tf_partial_current[i].x.array[:] = (
+                self.lambda_m_n_tableau[i] * self.Tf_partial_previous[i].vector
+                + self.T_current.vector * self.dt * self.phi.vector
+            ) / (
+                self.lambda_m_n_tableau[i] + self.dt * self.phi.vector
+            )
+            self._update_values(current=self.Tf_partial_current[i],
+                                previous=self.Tf_partial_previous[i])
+
+        return
+
+
+    def __update_fictive_temperature(self) -> None:
+        """
+        Update the fictive temperature for the current timestep.
+        C.f. Nielsen et al., Eq. 26
+        """
+        self.Tf_current.x.array[:] = 0.0
+        for i in range(0,self.m_n_tableau.size):
+            self.Tf_current.x.array[:] += self.Tf_partial_current[i].vector * self.m_n_tableau[i]
+        self._update_values(current=self.Tf_current,
+                            previous=self.Tf_previous)
+
+        return
+
+
+    def solve(self) -> None:
+        print("Starting solve")
+        t_start = time()
+        for _ in range(self.n_steps):
+            self.t += self.dt
+            self.solve_timestep(t=self.t)
+        t_end = time()
+        print(f"Solve finished in {t_end - t_start} seconds.")
+
+        self._finalize()
+        return
+
+
+    def _finalize(self) -> None:
+        self.outfile.close()
