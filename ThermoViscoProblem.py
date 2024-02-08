@@ -74,34 +74,46 @@ class ThermoViscoProblem:
         # Temperature
         # Heat equation with radiation BC is nonlinear, thus
         # there is no TrialFunction
-        self.T_current = Function(self.fs_T)
+        # BUG: For C++ forms to compile directly, function names must
+        # conform to c++ standards, i.e. no whitespace
+        self.T_current = Function(self.fs_T, name="Temperature")
         # For output
-        self.T_current.name = "Temperature"
         self.T_previous = Function(self.fs_T) # previous time step
         self.T_next = Function(self.fs_T) 
         # For building the weak form
         self.v = TestFunction(self.fs_T)
 
         # Shift function
-        self.phi = Function(self.fs_T)
-        self.phi.name = "Shift function"
+        self.phi = Function(self.fs_T, name="Shift_function")
 
         # Partial fictive temperatures
         # Looping through a list causes problems, likely during
         # JIT and AD
         self.Tf_partial_previous = np.array([Function(self.fs_T) for i in range(0,self.m_n_tableau.size)],
                                             dtype=object)
-        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}-th partial fictive temperature") for i in range(0,self.m_n_tableau.size)],
+        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}-th_partial_fictive_temperature") for i in range(0,self.m_n_tableau.size)],
                                            dtype=object)
-        #self.Tf_partial_current.name = "Partial fictive temperature"
 
         # Fictive temperature
         self.Tf_previous = Function(self.fs_T)
-        self.Tf_current = Function(self.fs_T)        
-        self.Tf_current.name = "Fictive temperature"
+        self.Tf_current = Function(self.fs_T, name="Fictive_Temperature")        
 
-        return
+        # Thermal strain
+        self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
+        self.thermal_expr = Expression(
+            self.I * (self.alpha_solid * (self.T_current - self.T_previous)
+                      + (self.alpha_liquid - self.alpha_solid) * (self.Tf_current - self.Tf_previous)),
+            self.fs_sigma.element.interpolation_points()
+        )
     
+        self.total_strain = Function(self.fs_sigma, name="Total_strain")
+        self.total_expr = Expression(
+            - self.thermal_strain,
+            self.fs_sigma.element.interpolation_points()
+        )
+    
+        return
+
 
     def __init_material_model_constants(self) -> None:
         """
@@ -363,6 +375,8 @@ class ThermoViscoProblem:
         self.__update_shift_function()
         self.__update_partial_fictive_temperature()
         self.__update_fictive_temperature()
+        self.__update_thermal_strain()
+        self.__update_total_strain()
         
         return 
     
@@ -407,6 +421,26 @@ class ThermoViscoProblem:
             self.Tf_current.x.array[:] += self.Tf_partial_current[i].vector * self.m_n_tableau[i]
         self._update_values(current=self.Tf_current,
                             previous=self.Tf_previous)
+
+        return
+    
+    
+    def __update_thermal_strain(self) -> None:
+        """
+        Update the thermal strain for the current timestep.
+        c.f. Nielsen et al., Eq. 9
+        """
+        self.thermal_strain.interpolate(self.thermal_expr)
+
+        return
+    
+
+    def __update_total_strain(self) -> None:
+        """
+        Update the total strain for the current timestep.
+        c.f. Nielsen et al., Eq. 28
+        """
+        self.total_strain.interpolate(self.total_expr)
 
         return
 
