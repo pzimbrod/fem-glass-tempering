@@ -9,7 +9,7 @@ from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc,
                         assemble_scalar, VectorFunctionSpace, Expression)
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, NonlinearProblem
 from ufl import (TrialFunction, TestFunction, FiniteElement, TensorElement,
-                 VectorElement,grad, dot, inner, Identity, exp,
+                 VectorElement,grad, dot, inner, Identity, exp, tr,
                  lhs, rhs, Measure, SpatialCoordinate, FacetNormal)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
@@ -25,6 +25,7 @@ class ThermoViscoProblem:
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=1)
         
+        self.dim = self.mesh.topology.dim
         self.dt = dt
         # The time domain
         self.time = time
@@ -83,20 +84,32 @@ class ThermoViscoProblem:
         # For building the weak form
         self.v = TestFunction(self.fs_T)
 
-        # Shift function
-        self.phi = Function(self.fs_T, name="Shift_function")
+        
 
         # Partial fictive temperatures
         # Looping through a list causes problems, likely during
         # JIT and AD
         self.Tf_partial_previous = np.array([Function(self.fs_T) for i in range(0,self.m_n_tableau.size)],
                                             dtype=object)
-        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}-th_partial_fictive_temperature") for i in range(0,self.m_n_tableau.size)],
+        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}-th_partial_fictive_temperature") 
+                                            for i in range(0,self.m_n_tableau.size)],
                                            dtype=object)
 
         # Fictive temperature
         self.Tf_previous = Function(self.fs_T)
-        self.Tf_current = Function(self.fs_T, name="Fictive_Temperature")        
+        self.Tf_current = Function(self.fs_T, name="Fictive_Temperature") 
+
+        # Shift function
+        self.phi = Function(self.fs_T, name="Shift_function")
+        self.phi_expr = Expression(
+            ufl.exp(
+            self.H / self.Rg * (
+                1.0 / self.Tb
+                - self.chi / self.T_current
+                - (1.0 - self.chi) / self.Tf_previous
+            )),
+            self.fs_T.element.interpolation_points()
+        )       
 
         # Thermal strain
         self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
@@ -109,6 +122,13 @@ class ThermoViscoProblem:
         self.total_strain = Function(self.fs_sigma, name="Total_strain")
         self.total_expr = Expression(
             - self.thermal_strain,
+            self.fs_sigma.element.interpolation_points()
+        )
+
+        self.deviatoric_strain = Function(self.fs_sigma, name="Deviatoric_strain")
+        self.deviatoric_expr = Expression(
+            # TODO: Find out if 1/3 applies for all dims
+            self.total_strain - 1/self.dim * self.I * tr(self.total_strain),
             self.fs_sigma.element.interpolation_points()
         )
     
@@ -183,9 +203,8 @@ class ThermoViscoProblem:
         Args:
             - `model_parameters`: dict holding the parameter values
         """
-        dim = self.mesh.topology.dim
         # Identity tensor
-        self.I = Identity(dim)
+        self.I = Identity(self.dim)
         # Intial (fictive) temperture [K]
         self.T_init = Constant(self.mesh, model_parameters["T_0"])
         # Ambient temperature [K]
@@ -319,6 +338,7 @@ class ThermoViscoProblem:
         self.ksp = self.solver.krylov_solver
         opts = PETSc.Options()
         option_prefix = self.ksp.getOptionsPrefix()
+        # Linear system produced by heat equation is SPD, thus we can use CG
         opts[f"{option_prefix}ksp_type"] = "cg"
         opts[f"{option_prefix}pc_type"] = "gamg"
         opts[f"{option_prefix}pc_factor_mat_solver_type"] = "mumps"
@@ -349,6 +369,7 @@ class ThermoViscoProblem:
         print(f"t={self.t}")
         self._solve_T()
         self._solve_Tf()
+        self._solve_strains()
         self._write_output()
     
 
@@ -375,20 +396,27 @@ class ThermoViscoProblem:
         self.__update_shift_function()
         self.__update_partial_fictive_temperature()
         self.__update_fictive_temperature()
-        self.__update_thermal_strain()
-        self.__update_total_strain()
         
         return 
     
+    def _solve_strains(self) -> None:
+        """
+        Calculate the current strains,
+        c.f. Nielsen et al., Fig. 5.:
+
+        Steps:
+        - compute thermal strain
+        - compute total strain (normally from thermal and mechanical strain)
+        - compute deviatoric strain
+        """ 
+        self.__update_thermal_strain()
+        self.__update_total_strain()
+        self.__update_deviatoric_strain()
+
+        return
 
     def __update_shift_function(self) -> None:
-        self.phi.x.array[:] = np.exp(
-            self.H / self.Rg * (
-                1.0 / self.Tb
-                - self.chi / self.T_current.vector
-                - (1.0 - self.chi) / self.Tf_previous.vector
-            )
-        )
+        self.phi.interpolate(self.phi_expr)
 
         return
 
@@ -441,6 +469,16 @@ class ThermoViscoProblem:
         c.f. Nielsen et al., Eq. 28
         """
         self.total_strain.interpolate(self.total_expr)
+
+        return
+    
+
+    def __update_deviatoric_strain(self) -> None:
+        """
+        Update the total strain for the current timestep.
+        c.f. Nielsen et al., Eq. 28
+        """
+        self.deviatoric_strain.interpolate(self.deviatoric_expr)
 
         return
 
