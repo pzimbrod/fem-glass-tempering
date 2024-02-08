@@ -91,13 +91,17 @@ class ThermoViscoProblem:
         # JIT and AD
         self.Tf_partial_previous = np.array([Function(self.fs_T) for i in range(0,self.m_n_tableau.size)],
                                             dtype=object)
-        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}-th_partial_fictive_temperature") 
+        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}th_partial_fictive_temperature") 
                                             for i in range(0,self.m_n_tableau.size)],
                                            dtype=object)
 
         # Fictive temperature
         self.Tf_previous = Function(self.fs_T)
         self.Tf_current = Function(self.fs_T, name="Fictive_Temperature") 
+        self.Tf_expr = Expression(
+            np.dot(self.m_n_tableau,self.Tf_partial_current),
+            self.fs_T.element.interpolation_points()
+        )
 
         # Shift function
         self.phi = Function(self.fs_T, name="Shift_function")
@@ -444,9 +448,7 @@ class ThermoViscoProblem:
         Update the fictive temperature for the current timestep.
         C.f. Nielsen et al., Eq. 26
         """
-        self.Tf_current.x.array[:] = 0.0
-        for i in range(0,self.m_n_tableau.size):
-            self.Tf_current.x.array[:] += self.Tf_partial_current[i].vector * self.m_n_tableau[i]
+        self.Tf_current.interpolate(self.Tf_expr)
         self._update_values(current=self.Tf_current,
                             previous=self.Tf_previous)
 
