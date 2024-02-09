@@ -37,6 +37,7 @@ class ThermoViscoProblem:
         self.__init_model_parameters(model_parameters=model_parameters)
         self.__init_function_spaces(config=config)
         self.__init_functions()
+        self.__init_expressions()
 
         self.jit_options = jit_options
 
@@ -89,8 +90,6 @@ class ThermoViscoProblem:
         # For building the weak form
         self.v = TestFunction(self.fs_T)
 
-        
-
         # Partial fictive temperatures
         # Looping through a list causes problems, likely during
         # JIT and AD
@@ -100,13 +99,31 @@ class ThermoViscoProblem:
         # Fictive temperature
         self.Tf_previous = Function(self.fs_T)
         self.Tf_current = Function(self.fs_T, name="Fictive_Temperature") 
-        self.Tf_expr = Expression(
-            inner(self.m_n_tableau,self.Tf_partial_current),
-            self.fs_T.element.interpolation_points()
-        )
 
         # Shift function
         self.phi = Function(self.fs_T, name="Shift_function")
+        self.phi_shift = Function(self.fs_T)
+        self.phi_shift_next = Function(self.fs_T)
+        # Shifted time
+        self.xi = Function(self.fs_T, name="Shifted_time")
+
+        # Thermal strain
+        self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
+        self.total_strain = Function(self.fs_sigma, name="Total_strain")
+        self.deviatoric_strain = Function(self.fs_sigma, name="Deviatoric_strain")
+    
+        return
+    
+    def __init_expressions(self) -> None:
+        """
+        Initialize the FEniCS expressions that are needed
+        to compute the derived quantities defined in Nielsen et al.
+        for the viscoelastic tempering model.
+        They are individually called each time step by their respective
+        self.__update methods.
+        """
+
+        # Eq. 25
         self.phi_expr = Expression(
             ufl.exp(
             self.H / self.Rg * (
@@ -117,6 +134,7 @@ class ThermoViscoProblem:
             self.fs_T.element.interpolation_points()
         )       
 
+        # Eq. 24
         self.Tf_partial_expr = Expression(
             ufl.as_vector([(
                 self.lambda_m_n_tableau[i] * self.Tf_partial_previous[i]
@@ -127,27 +145,59 @@ class ThermoViscoProblem:
              self.fs_Tfp.element.interpolation_points()
         )
 
-        # Thermal strain
-        self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
+        # Eq. 26
+        self.Tf_expr = Expression(
+            inner(self.m_n_tableau,self.Tf_partial_current),
+            self.fs_T.element.interpolation_points()
+        )
+
+        # Eq. 9
         self.thermal_expr = Expression(
             self.I * (self.alpha_solid * (self.T_current - self.T_previous)
                       + (self.alpha_liquid - self.alpha_solid) * (self.Tf_current - self.Tf_previous)),
             self.fs_sigma.element.interpolation_points()
         )
     
-        self.total_strain = Function(self.fs_sigma, name="Total_strain")
+        # Eq. 28
         self.total_expr = Expression(
             - self.thermal_strain,
             self.fs_sigma.element.interpolation_points()
         )
 
-        self.deviatoric_strain = Function(self.fs_sigma, name="Deviatoric_strain")
+        # Eq. 29
         self.deviatoric_expr = Expression(
             # TODO: Find out if 1/3 applies for all dims
             self.total_strain - 1/self.dim * self.I * tr(self.total_strain),
             self.fs_sigma.element.interpolation_points()
         )
-    
+
+        # No eq. specified, extrapolation step
+        # T(i+1) = T(i) + dT = T(i) + (T(i) - T(i-1))
+        self.T_next_expr = Expression(
+            self.T_current + (self.T_current - self.T_previous),
+            self.fs_T.element.interpolation_points()
+        )
+
+        # Eq. 5
+        self.phi_shift_expr = Expression(
+            ufl.exp(
+                self.H / self.Rg * (1/self.Tb - 1/self.T_current)
+            ),
+            self.fs_T.element.interpolation_points()
+        )
+        self.phi_shift_next_expr = Expression(
+            ufl.exp(
+                self.H / self.Rg * (1/self.Tb - 1/self.T_next)
+            ),
+            self.fs_T.element.interpolation_points()
+        )
+
+        # Eq. 19
+        self.xi_expr = Expression(
+            self.dt/2 * (self.phi_shift_next - self.phi_shift),
+            self.fs_T.element.interpolation_points()
+        )
+
         return
 
 
@@ -327,8 +377,9 @@ class ThermoViscoProblem:
         self.outfile.write_function(self.phi,t)
         # Fictive temperature
         self.outfile.write_function(self.Tf_current, t)
-        #self.outfile.write_function([*self.Tf_partial_current], t)
         self.outfile.write_function(self.Tf_partial_current, t)
+        # Shifted time
+        self.outfile.write_function(self.xi, t)
 
         
 
@@ -385,10 +436,13 @@ class ThermoViscoProblem:
                 self.T_current,
                 self.phi,
                 self.Tf_partial_current,
-                self.Tf_current
+                self.Tf_current,
+                self.xi
             ],
             t=self.t
         )
+
+        return
     
 
     def solve_timestep(self,t) -> None:
@@ -396,7 +450,15 @@ class ThermoViscoProblem:
         self._solve_T()
         self._solve_Tf()
         self._solve_strains()
+        self._solve_shifted_time()
         self._write_output()
+        
+        # For some computations, T_previous is needed
+        # thus, we update only at the end of each timestep
+        self._update_values(current=self.T_current,
+                            previous=self.T_previous)
+        
+        return
     
 
     def _solve_T(self) -> None:
@@ -405,8 +467,6 @@ class ThermoViscoProblem:
         Update values and write current values to file.
         """
         n, converged = self.solver.solve(self.T_current)
-        self._update_values(current=self.T_current,
-                            previous=self.T_previous)
         return
     
     def _solve_Tf(self) -> None:
@@ -440,6 +500,15 @@ class ThermoViscoProblem:
         self.__update_deviatoric_strain()
 
         return
+    
+    def _solve_shifted_time(self) -> None:
+        """
+        Calculate the shifted Time,
+        c.f. Nielsen et al., Eq. 19
+        """
+        self.__update_T_next()
+        self.__update_phi()
+        self.__update_xi()
 
     def __update_shift_function(self) -> None:
         self.phi.interpolate(self.phi_expr)
@@ -499,6 +568,19 @@ class ThermoViscoProblem:
         self.deviatoric_strain.interpolate(self.deviatoric_expr)
 
         return
+
+    def __update_T_next(self) -> None:
+
+        self.T_next.interpolate(self.T_next_expr)
+
+        return
+    
+    def __update_phi(self) -> None:
+        self.phi_shift.interpolate(self.phi_shift_expr)
+        self.phi_shift_next.interpolate(self.phi_shift_next_expr)
+    
+    def __update_xi(self) -> None:
+        self.xi.interpolate(self.xi_expr)
 
 
     def solve(self) -> None:
