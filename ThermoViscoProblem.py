@@ -57,6 +57,11 @@ class ThermoViscoProblem:
                                   self.mesh.ufl_cell(),
                                   config["T"]["degree"])
         self.fs_T = FunctionSpace(mesh=self.mesh,element=self.fe_T)
+        self.fe_Tfp = VectorElement(config["T"]["element"],
+                                    self.mesh.ufl_cell(),
+                                    degree=config["T"]["degree"],
+                                    dim=self.tableau_size)
+        self.fs_Tfp = FunctionSpace(self.mesh,self.fe_Tfp)
 
         # Stress / strain
         self.fe_sigma = TensorElement(config["sigma"]["element"],
@@ -89,17 +94,14 @@ class ThermoViscoProblem:
         # Partial fictive temperatures
         # Looping through a list causes problems, likely during
         # JIT and AD
-        self.Tf_partial_previous = np.array([Function(self.fs_T) for i in range(0,self.m_n_tableau.size)],
-                                            dtype=object)
-        self.Tf_partial_current = np.array([Function(self.fs_T,name=f"{i}th_partial_fictive_temperature") 
-                                            for i in range(0,self.m_n_tableau.size)],
-                                           dtype=object)
+        self.Tf_partial_previous = Function(self.fs_Tfp)
+        self.Tf_partial_current = Function(self.fs_Tfp, name="Fictive_temperature")
 
         # Fictive temperature
         self.Tf_previous = Function(self.fs_T)
         self.Tf_current = Function(self.fs_T, name="Fictive_Temperature") 
         self.Tf_expr = Expression(
-            np.dot(self.m_n_tableau,self.Tf_partial_current),
+            inner(self.m_n_tableau,self.Tf_partial_current),
             self.fs_T.element.interpolation_points()
         )
 
@@ -114,6 +116,16 @@ class ThermoViscoProblem:
             )),
             self.fs_T.element.interpolation_points()
         )       
+
+        self.Tf_partial_expr = Expression(
+            ufl.as_vector([(
+                self.lambda_m_n_tableau[i] * self.Tf_partial_previous[i]
+                + self.T_current * self.dt * self.phi)
+                / (self.lambda_m_n_tableau[i] + self.dt * self.phi)
+                for i in range(0,self.tableau_size)]
+            ),
+             self.fs_Tfp.element.interpolation_points()
+        )
 
         # Thermal strain
         self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
@@ -145,8 +157,9 @@ class ThermoViscoProblem:
         """
         # weighting coefficient for temperature and structural energies, c.f. Nielsen et al. eq. 8
         self.chi = 0.5
+        self.tableau_size = 6
 
-        self.m_n_tableau = np.array([
+        self.m_n_tableau = Constant(self.mesh,[
             5.523e-2,
             8.205e-2,
             1.215e-1,
@@ -154,7 +167,7 @@ class ThermoViscoProblem:
             2.860e-1,
             2.265e-1,
         ])
-        self.lambda_m_n_tableau = np.array([
+        self.lambda_m_n_tableau = Constant(self.mesh,[
             5.965e-4,
             1.077e-2,
             1.362e-1,
@@ -162,7 +175,7 @@ class ThermoViscoProblem:
             6.747e+0,
             2.963e+1,
         ])
-        self.g_n_tableau = np.array([
+        self.g_n_tableau = Constant(self.mesh,[
             1.585,
             2.354,
             3.486,
@@ -170,7 +183,7 @@ class ThermoViscoProblem:
             8.205,
             6.498,
         ])
-        self.lambda_g_n_tableau = np.array([
+        self.lambda_g_n_tableau = Constant(self.mesh,[
             6.658e-5,
             1.197e-3,
             1.514e-2,
@@ -178,7 +191,7 @@ class ThermoViscoProblem:
             7.497e-1,
             3.292e+0
         ])
-        self.k_n_tableau = np.array([
+        self.k_n_tableau = Constant(self.mesh,[
             7.588e-1,
             7.650e-1,
             9.806e-1,
@@ -187,7 +200,7 @@ class ThermoViscoProblem:
             1.090e+1,
             
         ])
-        self.lambda_k_n_tableau = np.array([
+        self.lambda_k_n_tableau = Constant(self.mesh,[
             5.009e-5,
             9.945e-4,
             2.022e-3,
@@ -281,9 +294,17 @@ class ThermoViscoProblem:
         values.
         For t0, Tf(n) = T (c.f. Nielsen et al., eq. 27)
         """
-        for (previous,current) in zip(self.Tf_partial_previous,self.Tf_partial_current):
-            current.x.array[:] = self.T_current.x.array[:]
-            previous.x.array[:] = self.T_previous.x.array[:]
+        #for (previous,current) in zip(self.Tf_partial_previous,self.Tf_partial_current):
+        #    current.x.array[:] = self.T_current.x.array[:]
+        #    previous.x.array[:] = self.T_previous.x.array[:]
+        temp_value = self.T_current.x.array[0]
+        dim = self.tableau_size
+        def Tf_init(x):
+            values = np.full((dim,x.shape[1]), temp_value, dtype = ScalarType) 
+            return values
+
+        self.Tf_partial_previous.interpolate(Tf_init)
+        self.Tf_partial_current.interpolate(Tf_init)
 
         return
     
@@ -306,7 +327,8 @@ class ThermoViscoProblem:
         self.outfile.write_function(self.phi,t)
         # Fictive temperature
         self.outfile.write_function(self.Tf_current, t)
-        self.outfile.write_function([*self.Tf_partial_current], t)
+        #self.outfile.write_function([*self.Tf_partial_current], t)
+        self.outfile.write_function(self.Tf_partial_current, t)
 
         
 
@@ -362,7 +384,7 @@ class ThermoViscoProblem:
             [
                 self.T_current,
                 self.phi,
-                *self.Tf_partial_current,
+                self.Tf_partial_current,
                 self.Tf_current
             ],
             t=self.t
@@ -430,15 +452,9 @@ class ThermoViscoProblem:
         Update the partial fictive temperature for the current timestep.
         C.f. Nielsen et al., Eq. 24
         """        
-        for i in range(0,self.Tf_partial_current.size):
-            self.Tf_partial_current[i].x.array[:] = (
-                self.lambda_m_n_tableau[i] * self.Tf_partial_previous[i].vector
-                + self.T_current.vector * self.dt * self.phi.vector
-            ) / (
-                self.lambda_m_n_tableau[i] + self.dt * self.phi.vector
-            )
-            self._update_values(current=self.Tf_partial_current[i],
-                                previous=self.Tf_partial_previous[i])
+        self.Tf_partial_current.interpolate(self.Tf_partial_expr)
+        self._update_values(current=self.Tf_partial_current,
+                            previous=self.Tf_partial_previous)
 
         return
 
