@@ -9,13 +9,15 @@ from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc,
                         assemble_scalar, VectorFunctionSpace, Expression)
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, NonlinearProblem
 from ufl import (TrialFunction, TestFunction, FiniteElement, TensorElement,
-                 VectorElement,grad, dot, inner, Identity, exp, tr,
+                 VectorElement, MixedElement, grad, dot, inner, Identity,
+                 exp, tr, sym,
                  lhs, rhs, Measure, SpatialCoordinate, FacetNormal)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
 import numpy as np
 import ufl
-from math import ceil
+from basix.ufl import element, mixed_element
+from math import ceil, factorial
 from time import time
 
 class ThermoViscoProblem:
@@ -58,6 +60,7 @@ class ThermoViscoProblem:
                                   self.mesh.ufl_cell(),
                                   config["T"]["degree"])
         self.fs_T = FunctionSpace(mesh=self.mesh,element=self.fe_T)
+        # Partial fictive temperature is summarized in a vector (6 x T)
         self.fe_Tfp = VectorElement(config["T"]["element"],
                                     self.mesh.ufl_cell(),
                                     degree=config["T"]["degree"],
@@ -67,8 +70,18 @@ class ThermoViscoProblem:
         # Stress / strain
         self.fe_sigma = TensorElement(config["sigma"]["element"],
                                       self.mesh.ufl_cell(),
-                                      config["sigma"]["degree"])
+                                      config["sigma"]["degree"],
+                                      shape=(self.dim,self.dim))
+        # Partial stresses are summarized in a 3-dim tensor (6 x dim x dim)
+        # c.f. https://fenicsproject.discourse.group/t/ways-to-define-vector-elements/12642/8 
+        self.fe_sigma_p = element(config["sigma"]["element"],
+                                 self.mesh.basix_cell(),
+                                 config["sigma"]["degree"],
+                                 shape=(self.tableau_size,self.dim,self.dim))
+        
         self.fs_sigma = FunctionSpace(mesh=self.mesh, element=self.fe_sigma)
+        self.fs_sigma_p = FunctionSpace(mesh=self.mesh,
+                                        element=self.fe_sigma_p)
         
         return
     
@@ -107,10 +120,27 @@ class ThermoViscoProblem:
         # Shifted time
         self.xi = Function(self.fs_T, name="Shifted_time")
 
-        # Thermal strain
+        # Strains
         self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
         self.total_strain = Function(self.fs_sigma, name="Total_strain")
         self.deviatoric_strain = Function(self.fs_sigma, name="Deviatoric_strain")
+    
+        # Stresses
+        self.ds_partial = Function(self.fs_sigma_p,
+                                   name="Deviatoric_stress_increment")
+        self.dsigma_partial = Function(self.fs_sigma_p,
+                                       name="Hydrostatic_stress_increment")
+        self.s_tilde_partial = Function(self.fs_sigma_p)
+        self.s_tilde = Function(self.fs_sigma)
+        self.s_tilde_partial_next = Function(self.fs_sigma_p)
+        self.s_tilde_next = Function(self.fs_sigma)
+        self.sigma_tilde_partial = Function(self.fs_sigma_p)
+        self.sigma_tilde_partial_next = Function(self.fs_sigma_p)
+        self.s_partial = Function(self.fs_sigma_p)
+        self.s_partial_next = Function(self.fs_sigma_p)
+        self.sigma_partial = Function(self.fs_sigma_p)
+        self.sigma_partial_next = Function(self.fs_sigma_p)
+        self.sigma_next = Function(self.fs_sigma, name="Stress_tensor")
     
         return
     
@@ -120,7 +150,7 @@ class ThermoViscoProblem:
         to compute the derived quantities defined in Nielsen et al.
         for the viscoelastic tempering model.
         They are individually called each time step by their respective
-        self.__update methods.
+        self.__update methods and stored as properties in advance, since they only have to be instantiated once.
         """
 
         # Eq. 25
@@ -197,8 +227,60 @@ class ThermoViscoProblem:
             self.dt/2 * (self.phi_shift_next - self.phi_shift),
             self.fs_T.element.interpolation_points()
         )
+        
+        # Eq. 15a + 20
+        self.ds_partial_expr = Expression(
+            ufl.as_tensor([
+                2.0 * lam_g_n * self.deviatoric_strain/self.xi *
+                lam_g_n * (1.0 - self.__taylor_exponential(lam_g_n))
+                for lam_g_n in self.lambda_g_n_tableau]),
+            self.fs_sigma_p.element.interpolation_points()
+        )
+
+        # Eq. 15b + 20
+        self.dsigma_partial_expr = Expression(
+            ufl.as_tensor([
+                2.0 * lam_k_n * sym(self.total_strain)/self.xi *
+                lam_k_n * self.__taylor_exponential(lam_k_n)
+                for lam_k_n in self.lambda_k_n_tableau]),
+            self.fs_sigma_p.element.interpolation_points()
+        )
+
+        # Eq. 13
+        self.s_tilde_next_expr = Expression(
+            inner(self.s_partial_next,self.s_partial_next),
+            self.fs_sigma.element.interpolation_points())
+        
+        # Eq. 16a
+        _, i, j = ufl.indices(3)
+        self.s_partial_next_expr = Expression(ufl.as_tensor([
+            self.s_partial[n,i,j] * self.__taylor_exponential(
+                self.lambda_g_n_tableau[n]) for n in range(0,self.tableau_size)
+            ]),
+            self.fs_sigma_p.element.interpolation_points()
+        )
+
+        # Eq. 16b
+        self.sigma_partial_next_expr = Expression(ufl.as_tensor([
+            self.sigma_partial[n,i,j] * self.__taylor_exponential(
+                self.lambda_k_n_tableau[n]) for n in range(0,self.tableau_size)
+            ]),
+            self.fs_sigma_p.element.interpolation_points())
+
 
         return
+
+
+    def __taylor_exponential(self,lambda_value):
+        """
+        A taylor series expression to replace an exponential
+        in order to avoid singularities,
+        c.f. Nielsen et al., Eq. 20.
+        """
+        return  (
+            np.sum([1.0/factorial(k)
+            * (- self.xi/lambda_value)**k for k in range(0,3)])
+            )
 
 
     def __init_material_model_constants(self) -> None:
@@ -451,6 +533,7 @@ class ThermoViscoProblem:
         self._solve_Tf()
         self._solve_strains()
         self._solve_shifted_time()
+        self._solve_stress()
         self._write_output()
         
         # For some computations, T_previous is needed
@@ -501,6 +584,7 @@ class ThermoViscoProblem:
 
         return
     
+
     def _solve_shifted_time(self) -> None:
         """
         Calculate the shifted Time,
@@ -509,6 +593,25 @@ class ThermoViscoProblem:
         self.__update_T_next()
         self.__update_phi()
         self.__update_xi()
+
+        return
+    
+    
+    def _solve_stress(self) -> None:
+        """
+        Calculate the current stresses,
+        c.f. Nielsen et al., Fig. 5.:
+
+        Steps:
+        - compute deviatoric stress
+        - compute hydrostatic stress
+        - compute total stress
+        """
+        self.__update_deviatoric_stress()
+        self.__update_hydrostatic_stress()
+
+        return
+
 
     def __update_shift_function(self) -> None:
         self.phi.interpolate(self.phi_expr)
@@ -578,9 +681,28 @@ class ThermoViscoProblem:
     def __update_phi(self) -> None:
         self.phi_shift.interpolate(self.phi_shift_expr)
         self.phi_shift_next.interpolate(self.phi_shift_next_expr)
+
+        return
+
     
     def __update_xi(self) -> None:
         self.xi.interpolate(self.xi_expr)
+
+        return
+
+
+    def __update_deviatoric_stress(self) -> None:
+        self.ds_partial.interpolate(self.ds_partial_expr)
+        self.s_partial_next.interpolate(self.s_partial_next_expr)
+
+        return
+    
+    
+    def __update_hydrostatic_stress(self) -> None:
+        self.dsigma_partial.interpolate(self.dsigma_partial_expr)
+        self.sigma_partial_next.interpolate(self.sigma_partial_next_expr)
+
+        return
 
 
     def solve(self) -> None:
