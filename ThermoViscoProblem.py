@@ -610,7 +610,7 @@ class ThermoViscoProblem:
         """
         self.__update_T_next()
         self.__update_phi()
-        self.__update_xi()
+        self.__update_shifted_time()
 
         return
     
@@ -704,7 +704,7 @@ class ThermoViscoProblem:
         return
 
     
-    def __update_xi(self) -> None:
+    def __update_shifted_time(self) -> None:
         self.xi.interpolate(self.xi_expr)
 
         return
@@ -715,6 +715,9 @@ class ThermoViscoProblem:
         self.s_tilde_partial_next.interpolate(self.s_tilde_partial_next_expr)
         self.s_partial_next.interpolate(self.s_partial_next_expr)
 
+        self._update_values(current=self.s_tilde_partial_next,previous=self.s_tilde_partial)
+        self._update_values(current=self.s_partial_next,previous=self.s_partial)
+
         return
     
     
@@ -722,6 +725,9 @@ class ThermoViscoProblem:
         self.dsigma_partial.interpolate(self.dsigma_partial_expr)
         self.sigma_tilde_partial_next.interpolate(self.sigma_tilde_partial_next_expr)
         self.sigma_partial_next.interpolate(self.sigma_partial_next_expr)
+
+        self._update_values(current=self.sigma_tilde_partial_next,previous=self.sigma_tilde_partial)
+        self._update_values(current=self.sigma_partial_next,previous=self.sigma_partial)
 
         return
     
