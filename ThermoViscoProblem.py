@@ -253,20 +253,38 @@ class ThermoViscoProblem:
         
         # Eq. 16a
         _, i, j = ufl.indices(3)
-        self.s_partial_next_expr = Expression(ufl.as_tensor([
-            self.s_partial[n,i,j] * self.__taylor_exponential(
+        self.s_tilde_partial_next_expr = Expression(ufl.as_tensor([
+            self.s_tilde_partial[n,i,j] * self.__taylor_exponential(
                 self.lambda_g_n_tableau[n]) for n in range(0,self.tableau_size)
             ]),
             self.fs_sigma_p.element.interpolation_points()
         )
 
         # Eq. 16b
-        self.sigma_partial_next_expr = Expression(ufl.as_tensor([
-            self.sigma_partial[n,i,j] * self.__taylor_exponential(
+        self.sigma_tilde_partial_next_expr = Expression(ufl.as_tensor([
+            self.sigma_tilde_partial[n,i,j] * self.__taylor_exponential(
                 self.lambda_k_n_tableau[n]) for n in range(0,self.tableau_size)
             ]),
             self.fs_sigma_p.element.interpolation_points())
 
+        # Eq. 17a
+        self.s_partial_next_expr = Expression(
+            self.ds_partial + self.s_tilde_partial_next,
+            self.fs_sigma_p.element.interpolation_points()
+        )
+
+        # Eq. 17b
+        self.sigma_partial_next_expr = Expression(
+            self.dsigma_partial + self.sigma_tilde_partial_next,
+            self.fs_sigma_p.element.interpolation_points()
+        )
+
+        # Eq. 18
+        self.sigma_next_expr = Expression(
+            np.sum([self.s_partial_next[n,:,:] + self.sigma_partial_next[n,:,:] for
+                    n in range(0,self.tableau_size)]),
+            self.fs_sigma.element.interpolation_points()
+        )
 
         return
 
@@ -609,6 +627,7 @@ class ThermoViscoProblem:
         """
         self.__update_deviatoric_stress()
         self.__update_hydrostatic_stress()
+        self.__update_total_stress()
 
         return
 
@@ -693,6 +712,7 @@ class ThermoViscoProblem:
 
     def __update_deviatoric_stress(self) -> None:
         self.ds_partial.interpolate(self.ds_partial_expr)
+        self.s_tilde_partial_next.interpolate(self.s_tilde_partial_next_expr)
         self.s_partial_next.interpolate(self.s_partial_next_expr)
 
         return
@@ -700,7 +720,14 @@ class ThermoViscoProblem:
     
     def __update_hydrostatic_stress(self) -> None:
         self.dsigma_partial.interpolate(self.dsigma_partial_expr)
+        self.sigma_tilde_partial_next.interpolate(self.sigma_tilde_partial_next_expr)
         self.sigma_partial_next.interpolate(self.sigma_partial_next_expr)
+
+        return
+    
+
+    def __update_total_stress(self) -> None:
+        self.sigma_next.interpolate(self.sigma_next_expr)
 
         return
 
