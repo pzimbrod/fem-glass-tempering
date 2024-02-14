@@ -16,10 +16,10 @@ dt = 0.1
 t = t_start
 
 mesh_path = "mesh1d.msh"
-create_new_mesh = False
+#create_new_mesh = False
 
-if create_new_mesh:
-    create_mesh(path=mesh_path)
+#if create_new_mesh:
+create_mesh(path=mesh_path)
 
 fe_config = {
     "T":        {"element": "CG", "degree": 1},
@@ -57,5 +57,5 @@ model = ThermoViscoProblem(mesh_path=mesh_path,config=fe_config,
                            time=time,dt=dt,model_parameters=model_params,
                            jit_options=jit_options)
 
-model.setup(dirichlet_bc=False,outfile_name="visco")
+model.setup(dirichlet_bc=False,outfile_name="visco",outfile_name1="stresses")
 model.solve()

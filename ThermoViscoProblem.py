@@ -72,16 +72,15 @@ class ThermoViscoProblem:
                                       self.mesh.ufl_cell(),
                                       config["sigma"]["degree"],
                                       shape=(self.dim,self.dim))
+        self.fs_sigma = FunctionSpace(mesh=self.mesh, element=self.fe_sigma)
+        
         # Partial stresses are summarized in a 3-dim tensor (6 x dim x dim)
         # c.f. https://fenicsproject.discourse.group/t/ways-to-define-vector-elements/12642/8 
         self.fe_sigma_p = element(config["sigma"]["element"],
                                  self.mesh.basix_cell(),
-                                 config["sigma"]["degree"],
+                                 degree=config["sigma"]["degree"],
                                  shape=(self.tableau_size,self.dim,self.dim))
-        
-        self.fs_sigma = FunctionSpace(mesh=self.mesh, element=self.fe_sigma)
-        self.fs_sigma_p = FunctionSpace(mesh=self.mesh,
-                                        element=self.fe_sigma_p)
+        self.fs_sigma_p = FunctionSpace(self.mesh,self.fe_sigma_p)
         
         return
     
@@ -240,7 +239,7 @@ class ThermoViscoProblem:
         # Eq. 15b + 20
         self.dsigma_partial_expr = Expression(
             ufl.as_tensor([
-                2.0 * lam_k_n * sym(self.total_strain)/self.xi *
+                lam_k_n * sym(self.total_strain)/self.xi *
                 lam_k_n * self.__taylor_exponential(lam_k_n)
                 for lam_k_n in self.lambda_k_n_tableau]),
             self.fs_sigma_p.element.interpolation_points()
@@ -401,11 +400,12 @@ class ThermoViscoProblem:
     
 
     def setup(self, dirichlet_bc: bool = False,
-              outfile_name: str = "visco") -> None:
+              outfile_name: str = "visco",
+              outfile_name1: str = "stresses") -> None:
         self._set_initial_condition(temp_value=self.T_init)
         if dirichlet_bc:
             self._set_dirichlet_bc(bc_value=self.T_ambient)
-        self._write_initial_output(outfile_name=outfile_name,t=self.t)
+        self._write_initial_output(outfile_name=outfile_name,outfile_name1=outfile_name1,t=self.t)
         self._setup_weak_form()
         self._setup_solver()
 
@@ -467,7 +467,7 @@ class ThermoViscoProblem:
                                   fem.locate_dofs_topological(self.fs, fdim, boundary_facets), self.fs)
 
 
-    def _write_initial_output(self, outfile_name: str, t: float = 0.0) -> None:
+    def _write_initial_output(self, outfile_name: str, outfile_name1: str,t: float = 0.0) -> None:
         self.outfile = io.VTKFile(self.mesh.comm, f"output/{outfile_name}.pvd", "w")
 
         self.outfile.write_mesh(self.mesh)
@@ -480,6 +480,13 @@ class ThermoViscoProblem:
         self.outfile.write_function(self.Tf_partial_current, t)
         # Shifted time
         self.outfile.write_function(self.xi, t)
+        
+        # Usage of XDMF visualization to show mixed elements (stresses)
+        self.outfile1 = io.XDMFFile(self.mesh.comm, f"output/{outfile_name1}.xdmf", "w")
+
+        self.outfile1.write_mesh(self.mesh)
+        # Stresses
+        self.outfile1.write_function(self.sigma_next, t)
 
         
 
@@ -537,8 +544,13 @@ class ThermoViscoProblem:
                 self.phi,
                 self.Tf_partial_current,
                 self.Tf_current,
-                self.xi
+                self.xi,
             ],
+            t=self.t
+        )
+        
+        self.outfile1.write_function(
+            self.sigma_next,
             t=self.t
         )
 
@@ -753,3 +765,4 @@ class ThermoViscoProblem:
 
     def _finalize(self) -> None:
         self.outfile.close()
+        self.outfile1.close()
