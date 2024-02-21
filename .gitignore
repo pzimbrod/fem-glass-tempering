@@ -164,16 +164,5 @@ cython_debug/
 **/*.h5
 *.vtk
 **/*.vtk
-*.vtu
-**/*.vtu
-*.vtp
-**/*.vtp
 *.xdmf
 **/*.xdmf
-
-*.pdf
-**/*.pdf
-
-output/*
-**/*.bp
-*.bp
