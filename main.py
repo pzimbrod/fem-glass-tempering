@@ -16,10 +16,10 @@ dt = 0.1
 t = t_start
 
 mesh_path = "mesh1d.msh"
-#create_new_mesh = False
+create_new_mesh = False
 
-#if create_new_mesh:
-create_mesh(path=mesh_path)
+if create_new_mesh:
+    create_mesh(path=mesh_path)
 
 fe_config = {
     "T":        {"element": "CG", "degree": 1},
