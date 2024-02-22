@@ -505,7 +505,7 @@ class ThermoViscoProblem:
             (self.T_current - self.T_previous) * self.v * dx
             + self.dt * (
             # Laplacian
-            + self.alpha * dot(grad(self.T_current),grad(self.v)) * dx
+            + self.alpha * inner(grad(self.T_current),grad(self.v)) * dx
             # Right hand side
             - self.f * self.v * dx
             # Radiation
@@ -527,11 +527,11 @@ class ThermoViscoProblem:
             # interior facets
             self.F += self.dt * self.alpha('+')*(
                 # p/h * <[[v]],[[T]]>
-                (penalty('+')/h('+')) * dot(jump(self.v,n),jump(self.T_current,n)) * dS
+                (penalty('+')/h('+')) * inner(jump(self.v,n),jump(self.T_current,n)) * dS
                 # - <{∇v},[[T·n]]>
-                - dot(avg(grad(self.v)), jump(self.T_current, n))*dS
+                - inner(avg(grad(self.v)), jump(self.T_current, n))*dS
                 # - <{v·n},[[∇T]]>
-                - dot(jump(self.v, n), avg(grad(self.T_current)))*dS
+                - inner(jump(self.v, n), avg(grad(self.T_current)))*dS
             )
 
         return
