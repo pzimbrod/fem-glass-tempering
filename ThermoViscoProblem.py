@@ -525,11 +525,13 @@ class ThermoViscoProblem:
 
             # DG Part of the weak form: additional surface integrals over
             # interior facets
-            # dS: interior facet measure
-            self.F += self.dt * (
-                self.alpha('+')*(penalty('+')/h('+')) * dot(jump(self.v,n),jump(self.T_current,n)) * dS
-                - self.alpha('+')*dot(avg(grad(self.v)), jump(self.T_current, n))*dS
-                - self.alpha('+')*dot(jump(self.v, n), avg(grad(self.T_current)))*dS
+            self.F += self.dt * self.alpha('+')*(
+                # p/h * <[[v]],[[T]]>
+                (penalty('+')/h('+')) * dot(jump(self.v,n),jump(self.T_current,n)) * dS
+                # - <{∇v},[[T·n]]>
+                - dot(avg(grad(self.v)), jump(self.T_current, n))*dS
+                # - <{v·n},[[∇T]]>
+                - dot(jump(self.v, n), avg(grad(self.T_current)))*dS
             )
 
         return
