@@ -10,7 +10,7 @@ from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc,
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, NonlinearProblem
 from ufl import (TrialFunction, TestFunction, FiniteElement, TensorElement,
                  VectorElement, MixedElement, grad, dot, inner, Identity,
-                 exp, tr, sym,
+                 exp, tr, sym, CellDiameter, avg, jump,
                  lhs, rhs, Measure, SpatialCoordinate, FacetNormal)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
@@ -55,6 +55,10 @@ class ThermoViscoProblem:
             - `config`: dictionary holding the types and degrees
                 of each finite element
         """
+        # Only CG and DG are supported
+        assert all(var["element"] in ['CG','DG']
+            for var in config.values()), "Only CG and DG elements are supported"
+
         # Temperature
         self.fe_T = FiniteElement(config["T"]["element"],
                                   self.mesh.ufl_cell(),
@@ -493,13 +497,15 @@ class ThermoViscoProblem:
     def _setup_weak_form(self) -> None:
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
+
+        element_type = self.fe_T.family()
         
         self.F = (
             # Mass Matrix
             (self.T_current - self.T_previous) * self.v * dx
             + self.dt * (
             # Laplacian
-            + dot(grad(self.T_current),grad(self.v)) * dx
+            + self.alpha * dot(grad(self.T_current),grad(self.v)) * dx
             # Right hand side
             - self.f * self.v * dx
             # Radiation
@@ -508,6 +514,25 @@ class ThermoViscoProblem:
             + 0.001 * self.htc * (self.T_current - self.T_ambient) * self.v * ds
             )
         )
+
+        if element_type == 'Discontinuous Lagrange':
+            # (SIP)DG specifics
+            dS = Measure("interior_facet",domain=self.mesh)
+            n = FacetNormal(self.mesh)
+            # penalty parameter to enforce continuity
+            penalty = Constant(self.mesh,ScalarType(5.0))
+            h = CellDiameter(self.mesh)
+
+            # DG Part of the weak form: additional surface integrals over
+            # interior facets
+            # dS: interior facet measure
+            self.F += self.dt * (
+                self.alpha('+')*(penalty('+')/h('+')) * dot(jump(self.v,n),jump(self.T_current,n)) * dS
+                - self.alpha('+')*dot(avg(grad(self.v)), jump(self.T_current, n))*dS
+                - self.alpha('+')*dot(jump(self.v, n), avg(grad(self.T_current)))*dS
+            )
+
+        return
     
 
     def _setup_solver(self) -> None:
