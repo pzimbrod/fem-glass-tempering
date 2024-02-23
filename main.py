@@ -22,7 +22,7 @@ if create_new_mesh:
     create_mesh(path=mesh_path)
 
 fe_config = {
-    "T":        {"element": "CG", "degree": 1},
+    "T":        {"element": "DG", "degree": 1},
     "sigma":    {"element": "CG", "degree": 1},
 }
 
@@ -38,7 +38,7 @@ model_params = {
     # Initial temperature
     "T_0": 800.0,
     # Convective heat transfer coefficient
-    "alpha": 0.0005,
+    "alpha": 1.0,
     "htc": 280.1,
     # Material density
     "rho": 2500.0,

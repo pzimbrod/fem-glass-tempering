@@ -164,5 +164,11 @@ cython_debug/
 **/*.h5
 *.vtk
 **/*.vtk
+*.vtu
+**/*.vtu
+*.pvtu
+**/*.pvtu
+*.pvd
+**/*.pvd
 *.xdmf
 **/*.xdmf
