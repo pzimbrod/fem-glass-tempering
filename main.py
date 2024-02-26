@@ -58,5 +58,5 @@ model = ThermoViscoProblem(mesh_path=mesh_path,config=fe_config,
                            time=time,dt=dt,model_parameters=model_params,
                            jit_options=jit_options)
 
-model.setup(dirichlet_bc=False,outfile_name="visco",outfile_name1="stresses")
+model.setup(dirichlet_bc=False)
 model.solve()
