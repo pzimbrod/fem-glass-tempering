@@ -409,7 +409,7 @@ class ThermoViscoProblem:
         self._set_initial_condition(temp_value=self.T_init)
         if dirichlet_bc:
             self._set_dirichlet_bc(bc_value=self.T_ambient)
-        self._write_initial_output(outfile_name=outfile_name,outfile_name1=outfile_name1,t=self.t)
+        self._write_initial_output(t=self.t)
         self._setup_weak_form()
         self._setup_solver()
 
@@ -469,28 +469,41 @@ class ThermoViscoProblem:
             self.mesh, fdim, lambda x: np.full(x.shape[1], True, dtype=bool))
         self.bc = fem.dirichletbc(PETSc.ScalarType(bc_value), 
                                   fem.locate_dofs_topological(self.fs, fdim, boundary_facets), self.fs)
-
-
-    def _write_initial_output(self, outfile_name: str, outfile_name1: str,t: float = 0.0) -> None:
-        self.outfile = io.VTKFile(self.mesh.comm, f"output/{outfile_name}.pvd", "w")
-
-        self.outfile.write_mesh(self.mesh)
-        # Temperature
-        self.outfile.write_function(self.T_current, t)
-        # Shift function
-        self.outfile.write_function(self.phi,t)
-        # Fictive temperature
-        self.outfile.write_function(self.Tf_current, t)
-        self.outfile.write_function(self.Tf_partial_current, t)
-        # Shifted time
-        self.outfile.write_function(self.xi, t)
         
-        # Usage of XDMF visualization to show mixed elements (stresses)
-        self.outfile1 = io.XDMFFile(self.mesh.comm, f"output/{outfile_name1}.xdmf", "w")
+        return
 
-        self.outfile1.write_mesh(self.mesh)
+
+    def _write_initial_output(self,t: float = 0.0) -> None:
+        self.vtx_files = [
+            # Temperature
+            io.VTXWriter(self.mesh.comm,"output/T.bp",
+                         [self.T_current],engine="BP4"),
+            # Shift function
+            io.VTXWriter(self.mesh.comm,"output/phi.bp",
+                         [self.phi],engine="BP4"),
+            # Fictive temperature
+            io.VTXWriter(self.mesh.comm,"output/Tf.bp",
+                         [self.Tf_current],engine="BP4"),
+            # BUG: VTXWriter doesn't support mixed elements
+            #io.VTXWriter(self.mesh.comm,"output/Tf_partial.bp",
+            #             [self.Tf_partial_current],engine="BP4"),
+            # Shifted time
+            io.VTXWriter(self.mesh.comm,"output/xi.bp",
+                         [self.xi],engine="BP4"),
+        ]
+        
+        for file in self.vtx_files:
+            file.write(t)
+
         # Stresses
-        self.outfile1.write_function(self.sigma_next, t)
+        # BUG: VTXWriter doesn't support TensorElement
+        self.outfile_sigma = io.XDMFFile(self.mesh.comm, 
+                                         "output/sigma.xdmf", "w")
+        self.outfile_sigma.write_mesh(self.mesh)
+        self.outfile_sigma.write_function(self.sigma_next, t)
+
+
+        return
 
         
 
@@ -565,21 +578,10 @@ class ThermoViscoProblem:
     
 
     def _write_output(self) -> None:
-        self.outfile.write_function(
-            [
-                self.T_current,
-                self.phi,
-                self.Tf_partial_current,
-                self.Tf_current,
-                self.xi,
-            ],
-            t=self.t
-        )
+        for file in self.vtx_files:
+            file.write(t=self.t)
         
-        self.outfile1.write_function(
-            self.sigma_next,
-            t=self.t
-        )
+        self.outfile_sigma.write_function(self.sigma_next,self.t)
 
         return
     
@@ -778,18 +780,25 @@ class ThermoViscoProblem:
 
 
     def solve(self) -> None:
-        print("Starting solve")
-        t_start = time()
+        if self.mesh.comm.rank == 0:
+            print("Starting solve")
+            t_start = time()
         for _ in range(self.n_steps):
             self.t += self.dt
             self.solve_timestep(t=self.t)
-        t_end = time()
-        print(f"Solve finished in {t_end - t_start} seconds.")
+        if self.mesh.comm.rank == 0:
+            t_end = time()
+            print(f"Solve finished in {t_end - t_start} seconds.")
 
         self._finalize()
+
         return
 
 
     def _finalize(self) -> None:
-        self.outfile.close()
-        self.outfile1.close()
+        for file in self.vtx_files:
+            file.close()
+        
+        self.outfile_sigma.close()
+
+        return
