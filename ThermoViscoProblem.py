@@ -565,6 +565,7 @@ class ThermoViscoProblem:
     
 
     def _write_output(self) -> None:
+        """
         self.outfile.write_function(
             [
                 self.T_current,
@@ -575,6 +576,7 @@ class ThermoViscoProblem:
             ],
             t=self.t
         )
+        """
         
         self.outfile1.write_function(
             self.sigma_next,
@@ -778,13 +780,15 @@ class ThermoViscoProblem:
 
 
     def solve(self) -> None:
-        print("Starting solve")
-        t_start = time()
+        if self.mesh.comm.rank == 0:
+            print("Starting solve")
+            t_start = time()
         for _ in range(self.n_steps):
             self.t += self.dt
             self.solve_timestep(t=self.t)
-        t_end = time()
-        print(f"Solve finished in {t_end - t_start} seconds.")
+        if self.mesh.comm.rank == 0:
+            t_end = time()
+            print(f"Solve finished in {t_end - t_start} seconds.")
 
         self._finalize()
         return
