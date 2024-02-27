@@ -175,18 +175,18 @@ class ViscoelasticModel:
         # Eq. 15a + 20
         self.expressions["ds_partial"] = Expression(
             ufl.as_tensor([
-                2.0 * lam_g_n * functions["deviatoric_strain"]/functions["xi"] *
-                lam_g_n * (1.0 - self._taylor_exponential(functions,lam_g_n))
-                for lam_g_n in self.lambda_g_n_tableau]),
+                2.0 * g_n * functions["deviatoric_strain"]/functions["xi"] *
+                lambda_g_n * (1.0 - self._taylor_exponential(functions,lambda_g_n))
+                for (lambda_g_n,g_n) in zip(self.lambda_g_n_tableau,self.g_n_tableau)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
 
         # Eq. 15b + 20
         self.expressions["dsigma_partial"] = Expression(
             ufl.as_tensor([
-                lam_k_n * sym(functions["total_strain"])/functions["xi"] *
-                lam_k_n * self._taylor_exponential(functions,lam_k_n)
-                for lam_k_n in self.lambda_k_n_tableau]),
+                k_n * sym(functions["total_strain"])/functions["xi"] *
+                lam_k_n * (1.0 - self._taylor_exponential(functions,lam_k_n))
+                for (lam_k_n,k_n) in zip(self.lambda_k_n_tableau,self.k_n_tableau)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
 
