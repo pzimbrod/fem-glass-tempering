@@ -184,7 +184,7 @@ class ViscoelasticModel:
         # Eq. 15b + 20
         self.expressions["dsigma_partial"] = Expression(
             ufl.as_tensor([
-                k_n * sym(functions["total_strain"])/functions["xi"] *
+                k_n * (tr(functions["total_strain"])*self.I)/functions["xi"] *
                 lam_k_n * (1.0 - self._taylor_exponential(functions,lam_k_n))
                 for (lam_k_n,k_n) in zip(self.lambda_k_n_tableau,self.k_n_tableau)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
