@@ -189,11 +189,6 @@ class ViscoelasticModel:
                 for (lam_k_n,k_n) in zip(self.lambda_k_n_tableau,self.k_n_tableau)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
-
-        # Eq. 13
-        self.expressions["s_tilde_next"] = Expression(
-            inner(functions_next["s_partial"],functions_next["s_partial"]),
-            functionSpaces["sigma"].element.interpolation_points())
         
         # Eq. 16a
         _, i, j = ufl.indices(3)

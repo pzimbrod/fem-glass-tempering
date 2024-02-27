@@ -158,7 +158,6 @@ class ThermoViscoProblem:
         self.functions["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions["s_tilde"] = Function(self.functionSpaces["sigma"])
         self.functions_next["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions["s_tilde_next"] = Function(self.functionSpaces["sigma"])
         self.functions["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions["s_partial"] = Function(self.functionSpaces["sigma_partial"])
