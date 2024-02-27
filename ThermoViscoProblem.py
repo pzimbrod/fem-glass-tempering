@@ -1,24 +1,24 @@
-from dolfinx.mesh import create_interval, locate_entities_boundary
+from dolfinx.mesh import locate_entities_boundary
 from mpi4py import MPI
 from dolfinx.mesh import locate_entities_boundary
-from dolfinx import fem, io, plot, nls, log
+from dolfinx import fem, io
 from dolfinx.nls import petsc
 from dolfinx.io import gmshio
-from dolfinx.fem import (FunctionSpace, Function, Constant, dirichletbc, 
-                        locate_dofs_geometrical, form, locate_dofs_topological, Expression,
-                        assemble_scalar, VectorFunctionSpace, Expression)
-from dolfinx.fem.petsc import assemble_matrix, assemble_vector, NonlinearProblem
-from ufl import (TrialFunction, TestFunction, FiniteElement, TensorElement,
-                 VectorElement, MixedElement, grad, dot, inner, Identity,
-                 exp, tr, sym, CellDiameter, avg, jump,
-                 lhs, rhs, Measure, SpatialCoordinate, FacetNormal)#, ds, dx
+from dolfinx.fem import (FunctionSpace, Function, Constant,)
+from dolfinx.fem.petsc import NonlinearProblem
+from ufl import (TestFunction, FiniteElement, TensorElement,
+                 VectorElement, grad, inner,
+                 CellDiameter, avg, jump,
+                 Measure, SpatialCoordinate, FacetNormal)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
 import numpy as np
-import ufl
-from basix.ufl import element, mixed_element
-from math import ceil, factorial
+from basix.ufl import element
+from math import ceil
 from time import time
+from ViscoelasticModel import ViscoelasticModel
+from ThermalModel import ThermalModel
+
 
 class ThermoViscoProblem:
     def __init__(self,mesh_path: str,time: tuple, dt: float,
@@ -35,17 +35,28 @@ class ThermoViscoProblem:
         self.t = self.time[0]
         self.n_steps = ceil((self.time[1] - self.time[0]) / self.dt)
 
-        self.__init_material_model_constants()
-        self.__init_model_parameters(model_parameters=model_parameters)
+        self.material_model = ViscoelasticModel(mesh=self.mesh, 
+                                            model_parameters=model_parameters)
+        self.physical_model = ThermalModel(
+            mesh=self.mesh,
+            model_parameters=model_parameters
+        )
+
         self.__init_function_spaces(config=config)
         self.__init_functions()
-        self.__init_expressions()
+
+        self.material_model._init_expressions(
+            functionSpaces=self.functionSpaces,
+            functions=self.functions,
+            functions_current=self.functions_current,
+            functions_previous=self.functions_previous,
+            functions_next=self.functions_next,
+            dt=self.dt)
 
         self.jit_options = jit_options
 
         return
-
-
+    
 
     def __init_function_spaces(self,config: dict) -> None:
         """
@@ -58,33 +69,36 @@ class ThermoViscoProblem:
         # Only CG and DG are supported
         assert all(var["element"] in ['CG','DG']
             for var in config.values()), "Only CG and DG elements are supported"
+        
+        self.finiteElements = {}
+        self.functionSpaces = {}
 
         # Temperature
-        self.fe_T = FiniteElement(config["T"]["element"],
+        self.finiteElements["T"] = FiniteElement(config["T"]["element"],
                                   self.mesh.ufl_cell(),
                                   config["T"]["degree"])
-        self.fs_T = FunctionSpace(mesh=self.mesh,element=self.fe_T)
+        self.functionSpaces["T"] = FunctionSpace(mesh=self.mesh,element=self.finiteElements["T"])
         # Partial fictive temperature is summarized in a vector (6 x T)
-        self.fe_Tfp = VectorElement(config["T"]["element"],
+        self.finiteElements["Tf_partial"] = VectorElement(config["T"]["element"],
                                     self.mesh.ufl_cell(),
                                     degree=config["T"]["degree"],
-                                    dim=self.tableau_size)
-        self.fs_Tfp = FunctionSpace(self.mesh,self.fe_Tfp)
+                                    dim=self.material_model.tableau_size)
+        self.functionSpaces["Tf_partial"] = FunctionSpace(self.mesh,self.finiteElements["Tf_partial"])
 
         # Stress / strain
-        self.fe_sigma = TensorElement(config["sigma"]["element"],
+        self.finiteElements["sigma"] = TensorElement(config["sigma"]["element"],
                                       self.mesh.ufl_cell(),
                                       config["sigma"]["degree"],
                                       shape=(self.dim,self.dim))
-        self.fs_sigma = FunctionSpace(mesh=self.mesh, element=self.fe_sigma)
+        self.functionSpaces["sigma"] = FunctionSpace(mesh=self.mesh, element=self.finiteElements["sigma"])
         
         # Partial stresses are summarized in a 3-dim tensor (6 x dim x dim)
         # c.f. https://fenicsproject.discourse.group/t/ways-to-define-vector-elements/12642/8 
-        self.fe_sigma_p = element(config["sigma"]["element"],
+        self.finiteElements["sigma_partial"] = element(config["sigma"]["element"],
                                  self.mesh.basix_cell(),
                                  degree=config["sigma"]["degree"],
-                                 shape=(self.tableau_size,self.dim,self.dim))
-        self.fs_sigma_p = FunctionSpace(self.mesh,self.fe_sigma_p)
+                                 shape=(self.material_model.tableau_size,self.dim,self.dim))
+        self.functionSpaces["sigma_partial"] = FunctionSpace(self.mesh,self.finiteElements["sigma_partial"])
         
         return
     
@@ -94,321 +108,74 @@ class ThermoViscoProblem:
         Create all necessary FEniCS functions to model the viscoelastic
         problem, c.f. Nielsen et al., Fig. 5
         """
+        # Time-dependent functions
+        self.functions_previous = {}
+        self.functions_current = {}
+        # Non time-dependent functions
+        self.functions = {}
+        # Only for extrapolation in the viscoelastic model
+        self.functions_next = {}
+
         # Temperature
         # Heat equation with radiation BC is nonlinear, thus
         # there is no TrialFunction
         # BUG: For C++ forms to compile directly, function names must
         # conform to c++ standards, i.e. no whitespace
-        self.T_current = Function(self.fs_T, name="Temperature")
+        self.functions_current["T"] = Function(self.functionSpaces["T"], name="Temperature")
         # For output
-        self.T_previous = Function(self.fs_T) # previous time step
-        self.T_next = Function(self.fs_T) 
+        self.functions_previous["T"] = Function(self.functionSpaces["T"]) # previous time step
+        self.functions_next["T"] = Function(self.functionSpaces["T"]) 
         # For building the weak form
-        self.v = TestFunction(self.fs_T)
+        self.v = TestFunction(self.functionSpaces["T"])
 
         # Partial fictive temperatures
         # Looping through a list causes problems, likely during
         # JIT and AD
-        self.Tf_partial_previous = Function(self.fs_Tfp)
-        self.Tf_partial_current = Function(self.fs_Tfp, name="Fictive_temperature")
+        self.functions_previous["Tf_partial"] = Function(self.functionSpaces["Tf_partial"])
+        self.functions_current["Tf_partial"] = Function(self.functionSpaces["Tf_partial"], name="Fictive_temperature")
 
         # Fictive temperature
-        self.Tf_previous = Function(self.fs_T)
-        self.Tf_current = Function(self.fs_T, name="Fictive_Temperature") 
+        self.functions_previous["Tf"] = Function(self.functionSpaces["T"])
+        self.functions_current["Tf"] = Function(self.functionSpaces["T"], name="Fictive_Temperature") 
 
         # Shift function
-        self.phi = Function(self.fs_T, name="Shift_function")
-        self.phi_shift = Function(self.fs_T)
-        self.phi_shift_next = Function(self.fs_T)
+        self.functions["phi"] = Function(self.functionSpaces["T"], name="Shift_function")
+        self.functions["phi"] = Function(self.functionSpaces["T"])
+        self.functions_next["phi"] = Function(self.functionSpaces["T"])
         # Shifted time
-        self.xi = Function(self.fs_T, name="Shifted_time")
+        self.functions["xi"] = Function(self.functionSpaces["T"], name="Shifted_time")
 
         # Strains
-        self.thermal_strain = Function(self.fs_sigma, name="Thermal_Strain")
-        self.total_strain = Function(self.fs_sigma, name="Total_strain")
-        self.deviatoric_strain = Function(self.fs_sigma, name="Deviatoric_strain")
+        self.functions["thermal_strain"] = Function(self.functionSpaces["sigma"], name="thermal_strain")
+        self.functions["total_strain"] = Function(self.functionSpaces["sigma"], name="total_strain")
+        self.functions["deviatoric_strain"] = Function(self.functionSpaces["sigma"], name="deviatoric_strain")
     
         # Stresses
-        self.ds_partial = Function(self.fs_sigma_p,
+        self.functions["ds_partial"] = Function(self.functionSpaces["sigma_partial"],
                                    name="Deviatoric_stress_increment")
-        self.dsigma_partial = Function(self.fs_sigma_p,
+        self.functions["dsigma_partial"] = Function(self.functionSpaces["sigma_partial"],
                                        name="Hydrostatic_stress_increment")
-        self.s_tilde_partial = Function(self.fs_sigma_p)
-        self.s_tilde = Function(self.fs_sigma)
-        self.s_tilde_partial_next = Function(self.fs_sigma_p)
-        self.s_tilde_next = Function(self.fs_sigma)
-        self.sigma_tilde_partial = Function(self.fs_sigma_p)
-        self.sigma_tilde_partial_next = Function(self.fs_sigma_p)
-        self.s_partial = Function(self.fs_sigma_p)
-        self.s_partial_next = Function(self.fs_sigma_p)
-        self.sigma_partial = Function(self.fs_sigma_p)
-        self.sigma_partial_next = Function(self.fs_sigma_p)
-        self.sigma_next = Function(self.fs_sigma, name="Stress_tensor")
+        self.functions["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions["s_tilde"] = Function(self.functionSpaces["sigma"])
+        self.functions_next["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions["s_tilde_next"] = Function(self.functionSpaces["sigma"])
+        self.functions["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions_next["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions["s_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions_next["s_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions_next["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions_next["sigma"] = Function(self.functionSpaces["sigma"], name="Stress_tensor")
     
-        return
-    
-    def __init_expressions(self) -> None:
-        """
-        Initialize the FEniCS expressions that are needed
-        to compute the derived quantities defined in Nielsen et al.
-        for the viscoelastic tempering model.
-        They are individually called each time step by their respective
-        self.__update methods and stored as properties in advance, since they only have to be instantiated once.
-        """
-
-        # Eq. 25
-        self.phi_expr = Expression(
-            ufl.exp(
-            self.H / self.Rg * (
-                1.0 / self.Tb
-                - self.chi / self.T_current
-                - (1.0 - self.chi) / self.Tf_previous
-            )),
-            self.fs_T.element.interpolation_points()
-        )       
-
-        # Eq. 24
-        self.Tf_partial_expr = Expression(
-            ufl.as_vector([(
-                self.lambda_m_n_tableau[i] * self.Tf_partial_previous[i]
-                + self.T_current * self.dt * self.phi)
-                / (self.lambda_m_n_tableau[i] + self.dt * self.phi)
-                for i in range(0,self.tableau_size)]
-            ),
-             self.fs_Tfp.element.interpolation_points()
-        )
-
-        # Eq. 26
-        self.Tf_expr = Expression(
-            inner(self.m_n_tableau,self.Tf_partial_current),
-            self.fs_T.element.interpolation_points()
-        )
-
-        # Eq. 9
-        self.thermal_expr = Expression(
-            self.I * (self.alpha_solid * (self.T_current - self.T_previous)
-                      + (self.alpha_liquid - self.alpha_solid) * (self.Tf_current - self.Tf_previous)),
-            self.fs_sigma.element.interpolation_points()
-        )
-    
-        # Eq. 28
-        self.total_expr = Expression(
-            - self.thermal_strain,
-            self.fs_sigma.element.interpolation_points()
-        )
-
-        # Eq. 29
-        self.deviatoric_expr = Expression(
-            # TODO: Find out if 1/3 applies for all dims
-            self.total_strain - 1/self.dim * self.I * tr(self.total_strain),
-            self.fs_sigma.element.interpolation_points()
-        )
-
-        # No eq. specified, extrapolation step
-        # T(i+1) = T(i) + dT = T(i) + (T(i) - T(i-1))
-        self.T_next_expr = Expression(
-            self.T_current + (self.T_current - self.T_previous),
-            self.fs_T.element.interpolation_points()
-        )
-
-        # Eq. 5
-        self.phi_shift_expr = Expression(
-            ufl.exp(
-                self.H / self.Rg * (1/self.Tb - 1/self.T_current)
-            ),
-            self.fs_T.element.interpolation_points()
-        )
-        self.phi_shift_next_expr = Expression(
-            ufl.exp(
-                self.H / self.Rg * (1/self.Tb - 1/self.T_next)
-            ),
-            self.fs_T.element.interpolation_points()
-        )
-
-        # Eq. 19
-        self.xi_expr = Expression(
-            self.dt/2 * (self.phi_shift_next - self.phi_shift),
-            self.fs_T.element.interpolation_points()
-        )
-        
-        # Eq. 15a + 20
-        self.ds_partial_expr = Expression(
-            ufl.as_tensor([
-                2.0 * lam_g_n * self.deviatoric_strain/self.xi *
-                lam_g_n * (1.0 - self.__taylor_exponential(lam_g_n))
-                for lam_g_n in self.lambda_g_n_tableau]),
-            self.fs_sigma_p.element.interpolation_points()
-        )
-
-        # Eq. 15b + 20
-        self.dsigma_partial_expr = Expression(
-            ufl.as_tensor([
-                lam_k_n * sym(self.total_strain)/self.xi *
-                lam_k_n * self.__taylor_exponential(lam_k_n)
-                for lam_k_n in self.lambda_k_n_tableau]),
-            self.fs_sigma_p.element.interpolation_points()
-        )
-
-        # Eq. 13
-        self.s_tilde_next_expr = Expression(
-            inner(self.s_partial_next,self.s_partial_next),
-            self.fs_sigma.element.interpolation_points())
-        
-        # Eq. 16a
-        _, i, j = ufl.indices(3)
-        self.s_tilde_partial_next_expr = Expression(ufl.as_tensor([
-            self.s_tilde_partial[n,i,j] * self.__taylor_exponential(
-                self.lambda_g_n_tableau[n]) for n in range(0,self.tableau_size)
-            ]),
-            self.fs_sigma_p.element.interpolation_points()
-        )
-
-        # Eq. 16b
-        self.sigma_tilde_partial_next_expr = Expression(ufl.as_tensor([
-            self.sigma_tilde_partial[n,i,j] * self.__taylor_exponential(
-                self.lambda_k_n_tableau[n]) for n in range(0,self.tableau_size)
-            ]),
-            self.fs_sigma_p.element.interpolation_points())
-
-        # Eq. 17a
-        self.s_partial_next_expr = Expression(
-            self.ds_partial + self.s_tilde_partial_next,
-            self.fs_sigma_p.element.interpolation_points()
-        )
-
-        # Eq. 17b
-        self.sigma_partial_next_expr = Expression(
-            self.dsigma_partial + self.sigma_tilde_partial_next,
-            self.fs_sigma_p.element.interpolation_points()
-        )
-
-        # Eq. 18
-        self.sigma_next_expr = Expression(
-            np.sum([self.s_partial_next[n,:,:] + self.sigma_partial_next[n,:,:] for
-                    n in range(0,self.tableau_size)]),
-            self.fs_sigma.element.interpolation_points()
-        )
-
-        return
-
-
-    def __taylor_exponential(self,lambda_value):
-        """
-        A taylor series expression to replace an exponential
-        in order to avoid singularities,
-        c.f. Nielsen et al., Eq. 20.
-        """
-        return  (
-            np.sum([1.0/factorial(k)
-            * (- self.xi/lambda_value)**k for k in range(0,3)])
-            )
-
-
-    def __init_material_model_constants(self) -> None:
-        """
-        Define the material model
-        """
-        # weighting coefficient for temperature and structural energies, c.f. Nielsen et al. eq. 8
-        self.chi = 0.5
-        self.tableau_size = 6
-
-        self.m_n_tableau = Constant(self.mesh,[
-            5.523e-2,
-            8.205e-2,
-            1.215e-1,
-            2.286e-1,
-            2.860e-1,
-            2.265e-1,
-        ])
-        self.lambda_m_n_tableau = Constant(self.mesh,[
-            5.965e-4,
-            1.077e-2,
-            1.362e-1,
-            1.505e-1,
-            6.747e+0,
-            2.963e+1,
-        ])
-        self.g_n_tableau = Constant(self.mesh,[
-            1.585,
-            2.354,
-            3.486,
-            6.558,
-            8.205,
-            6.498,
-        ])
-        self.lambda_g_n_tableau = Constant(self.mesh,[
-            6.658e-5,
-            1.197e-3,
-            1.514e-2,
-            1.672e-1,
-            7.497e-1,
-            3.292e+0
-        ])
-        self.k_n_tableau = Constant(self.mesh,[
-            7.588e-1,
-            7.650e-1,
-            9.806e-1,
-            7.301e+0,
-            1.347e+1,
-            1.090e+1,
-            
-        ])
-        self.lambda_k_n_tableau = Constant(self.mesh,[
-            5.009e-5,
-            9.945e-4,
-            2.022e-3,
-            1.925e-2,
-            1.199e-1,
-            2.033e+0,
-              # instead of Inf
-        ])
-        return
-    
-
-    def __init_model_parameters(self,model_parameters: dict) -> None:
-        """
-        Create all parameters of the viscoelastic model
-        as FEniCS constants
-        
-        Args:
-            - `model_parameters`: dict holding the parameter values
-        """
-        # Identity tensor
-        self.I = Identity(self.dim)
-        # Intial (fictive) temperture [K]
-        self.T_init = Constant(self.mesh, model_parameters["T_0"])
-        # Ambient temperature [K]
-        self.T_ambient = Constant(self.mesh, model_parameters["T_ambient"])
-        # Activation energy [J/mol]
-        self.H = Constant(self.mesh, model_parameters["H"])
-        # Universal gas constant [J/(mol K)]
-        self.Rg = Constant(self.mesh, model_parameters["Rg"])
-        # Base temperature [K]
-        self.Tb = Constant(self.mesh, model_parameters["Tb"])
-        # Solid thermal expansion coefficient [K^-1]
-        self.alpha_solid = Constant(self.mesh, model_parameters["alpha_solid"])
-        # Liquid thermal expansion coefficient [K^-1]
-        self.alpha_liquid = Constant(self.mesh, model_parameters["alpha_liquid"])
-
-        # Right hand side
-        self.f = Constant(self.mesh,ScalarType(model_parameters["f"]))
-        self.epsilon = Constant(self.mesh,ScalarType(model_parameters["epsilon"])) # view factor
-        self.sigma = Constant(self.mesh,ScalarType(model_parameters["sigma"])) # Stefan Boltzmann constant - W/m^2K^4
-        self.alpha = Constant(self.mesh,ScalarType(model_parameters["alpha"]))
-        self.htc = Constant(self.mesh,ScalarType(model_parameters["htc"]))     # heat convective coefficent - W/(m^2*K) 
-        self.rho = Constant(self.mesh, ScalarType(model_parameters["rho"]))    # density kg/m^3
-        self.cp = Constant(self.mesh,ScalarType(model_parameters["cp"]))       # specific heat - J/(kg*K)
-        self.k = Constant(self.mesh,ScalarType(model_parameters["k"]))         # thermal conductivity - W/(m*K) 
-
         return
     
 
     def setup(self, dirichlet_bc: bool = False,
               outfile_name: str = "visco",
               outfile_name1: str = "stresses") -> None:
-        self._set_initial_condition(temp_value=self.T_init)
+        self._set_initial_condition(temp_value=self.material_model.T_init)
         if dirichlet_bc:
-            self._set_dirichlet_bc(bc_value=self.T_ambient)
+            self._set_dirichlet_bc(bc_value=self.material_model.T_ambient)
         self._write_initial_output(t=self.t)
         self._setup_weak_form()
         self._setup_solver()
@@ -425,8 +192,8 @@ class ThermoViscoProblem:
         def temp_init(x):
             values = np.full(x.shape[1], temp_value, dtype = ScalarType) 
             return values
-        self.T_previous.interpolate(temp_init)
-        self.T_current.interpolate(temp_init)
+        self.functions_previous["T"].interpolate(temp_init)
+        self.functions_current["T"].interpolate(temp_init)
 
         return
     
@@ -436,8 +203,8 @@ class ThermoViscoProblem:
         Set the initial condition for fictive temperature.
         For t0, Tf = T (c.f. Nielsen et al., eq. 27)
         """
-        self.Tf_previous.x.array[:] = self.T_previous.x.array[:]
-        self.Tf_current.x.array[:] = self.T_current.x.array[:]
+        self.functions_previous["Tf"].x.array[:] = self.functions_previous["T"].x.array[:]
+        self.functions_current["Tf"].x.array[:] = self.functions_current["T"].x.array[:]
 
         return
     
@@ -448,17 +215,17 @@ class ThermoViscoProblem:
         values.
         For t0, Tf(n) = T (c.f. Nielsen et al., eq. 27)
         """
-        #for (previous,current) in zip(self.Tf_partial_previous,self.Tf_partial_current):
-        #    current.x.array[:] = self.T_current.x.array[:]
-        #    previous.x.array[:] = self.T_previous.x.array[:]
-        temp_value = self.T_current.x.array[0]
-        dim = self.tableau_size
+        #for (previous,current) in zip(self.functions_previous["Tf_partial"],self.functions_current["Tf_partial"]):
+        #    current.x.array[:] = self.functions_current["T"].x.array[:]
+        #    previous.x.array[:] = self.functions_previous["T"].x.array[:]
+        temp_value = self.functions_current["T"].x.array[0]
+        dim = self.material_model.tableau_size
         def Tf_init(x):
             values = np.full((dim,x.shape[1]), temp_value, dtype = ScalarType) 
             return values
 
-        self.Tf_partial_previous.interpolate(Tf_init)
-        self.Tf_partial_current.interpolate(Tf_init)
+        self.functions_previous["Tf_partial"].interpolate(Tf_init)
+        self.functions_current["Tf_partial"].interpolate(Tf_init)
 
         return
     
@@ -477,19 +244,19 @@ class ThermoViscoProblem:
         self.vtx_files = [
             # Temperature
             io.VTXWriter(self.mesh.comm,"output/T.bp",
-                         [self.T_current],engine="BP4"),
+                         [self.functions_current["T"]],engine="BP4"),
             # Shift function
             io.VTXWriter(self.mesh.comm,"output/phi.bp",
-                         [self.phi],engine="BP4"),
+                         [self.functions["phi"]],engine="BP4"),
             # Fictive temperature
             io.VTXWriter(self.mesh.comm,"output/Tf.bp",
-                         [self.Tf_current],engine="BP4"),
+                         [self.functions_current["Tf"]],engine="BP4"),
             # BUG: VTXWriter doesn't support mixed elements
             #io.VTXWriter(self.mesh.comm,"output/Tf_partial.bp",
-            #             [self.Tf_partial_current],engine="BP4"),
+            #             [self.functions_current["Tf_partial"]],engine="BP4"),
             # Shifted time
             io.VTXWriter(self.mesh.comm,"output/xi.bp",
-                         [self.xi],engine="BP4"),
+                         [self.functions["xi"]],engine="BP4"),
         ]
         
         for file in self.vtx_files:
@@ -500,7 +267,7 @@ class ThermoViscoProblem:
         self.outfile_sigma = io.XDMFFile(self.mesh.comm, 
                                          "output/sigma.xdmf", "w")
         self.outfile_sigma.write_mesh(self.mesh)
-        self.outfile_sigma.write_function(self.sigma_next, t)
+        self.outfile_sigma.write_function(self.functions_next["sigma"], t)
 
 
         return
@@ -511,20 +278,27 @@ class ThermoViscoProblem:
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
 
-        element_type = self.fe_T.family()
+        element_type = self.finiteElements["T"].family()
+
+        alpha = self.physical_model.alpha
+        f = self.physical_model.f
+        sigma = self.physical_model.sigma
+        epsilon = self.physical_model.epsilon
+        T_ambient = self.physical_model.T_ambient
+        htc = self.physical_model.htc
         
         self.F = (
             # Mass Matrix
-            (self.T_current - self.T_previous) * self.v * dx
+            (self.functions_current["T"] - self.functions_previous["T"]) * self.v * dx
             + self.dt * (
             # Laplacian
-            + self.alpha * inner(grad(self.T_current),grad(self.v)) * dx
+            + alpha * inner(grad(self.functions_current["T"]),grad(self.v)) * dx
             # Right hand side
-            - self.f * self.v * dx
+            - f * self.v * dx
             # Radiation
-            + 0.001 * (self.sigma * self.epsilon) * (self.T_current**4 - self.T_ambient**4) * self.v * ds
+            + 0.001 * (sigma * epsilon) * (self.functions_current["T"]**4 - T_ambient**4) * self.v * ds
             # Convection
-            + 0.001 * self.htc * (self.T_current - self.T_ambient) * self.v * ds
+            + 0.001 * htc * (self.functions_current["T"] - T_ambient) * self.v * ds
             )
         )
 
@@ -538,20 +312,20 @@ class ThermoViscoProblem:
 
             # DG Part of the weak form: additional surface integrals over
             # interior facets
-            self.F += self.dt * self.alpha('+')*(
+            self.F += self.dt * alpha('+')*(
                 # p/h * <[[v]],[[T]]>
-                (penalty('+')/h('+')) * inner(jump(self.v,n),jump(self.T_current,n)) * dS
+                (penalty('+')/h('+')) * inner(jump(self.v,n),jump(self.functions_current["T"],n)) * dS
                 # - <{∇v},[[T·n]]>
-                - inner(avg(grad(self.v)), jump(self.T_current, n))*dS
+                - inner(avg(grad(self.v)), jump(self.functions_current["T"], n))*dS
                 # - <{v·n},[[∇T]]>
-                - inner(jump(self.v, n), avg(grad(self.T_current)))*dS
+                - inner(jump(self.v, n), avg(grad(self.functions_current["T"])))*dS
             )
 
         return
     
 
     def _setup_solver(self) -> None:
-        self.prob = fem.petsc.NonlinearProblem(F=self.F,u=self.T_current,
+        self.prob = NonlinearProblem(F=self.F,u=self.functions_current["T"],
                                                jit_options=self.jit_options)
 
         self.solver = petsc.NewtonSolver(self.mesh.comm, self.prob)
@@ -581,7 +355,8 @@ class ThermoViscoProblem:
         for file in self.vtx_files:
             file.write(t=self.t)
         
-        self.outfile_sigma.write_function(self.sigma_next,self.t)
+        self.outfile_sigma.write_function(self.functions_next["sigma"],
+                                          self.t)
 
         return
     
@@ -595,10 +370,10 @@ class ThermoViscoProblem:
         self._solve_stress()
         self._write_output()
         
-        # For some computations, T_previous is needed
+        # For some computations, functions_previous["T"] is needed
         # thus, we update only at the end of each timestep
-        self._update_values(current=self.T_current,
-                            previous=self.T_previous)
+        self._update_values(current=self.functions_current["T"],
+                            previous=self.functions_previous["T"])
         
         return
     
@@ -608,7 +383,8 @@ class ThermoViscoProblem:
         Solve the heat equation for each time step.
         Update values and write current values to file.
         """
-        n, converged = self.solver.solve(self.T_current)
+        _, converged = self.solver.solve(self.functions_current["T"])
+        assert(converged)
         return
     
     def _solve_Tf(self) -> None:
@@ -674,7 +450,7 @@ class ThermoViscoProblem:
 
 
     def __update_shift_function(self) -> None:
-        self.phi.interpolate(self.phi_expr)
+        self.functions["phi"].interpolate(self.material_model.expressions["phi"])
 
         return
 
@@ -684,9 +460,11 @@ class ThermoViscoProblem:
         Update the partial fictive temperature for the current timestep.
         C.f. Nielsen et al., Eq. 24
         """        
-        self.Tf_partial_current.interpolate(self.Tf_partial_expr)
-        self._update_values(current=self.Tf_partial_current,
-                            previous=self.Tf_partial_previous)
+        self.functions_current["Tf_partial"].interpolate(
+            self.material_model.expressions["Tf_partial"]
+        )
+        self._update_values(current=self.functions_current["Tf_partial"],
+                            previous=self.functions_previous["Tf_partial"])
 
         return
 
@@ -696,9 +474,9 @@ class ThermoViscoProblem:
         Update the fictive temperature for the current timestep.
         C.f. Nielsen et al., Eq. 26
         """
-        self.Tf_current.interpolate(self.Tf_expr)
-        self._update_values(current=self.Tf_current,
-                            previous=self.Tf_previous)
+        self.functions_current["Tf"].interpolate(self.material_model.expressions["Tf"])
+        self._update_values(current=self.functions_current["Tf"],
+                            previous=self.functions_previous["Tf"])
 
         return
     
@@ -708,7 +486,9 @@ class ThermoViscoProblem:
         Update the thermal strain for the current timestep.
         c.f. Nielsen et al., Eq. 9
         """
-        self.thermal_strain.interpolate(self.thermal_expr)
+        self.functions["thermal_strain"].interpolate(
+            self.material_model.expressions["thermal_strain"]
+        )
 
         return
     
@@ -718,7 +498,9 @@ class ThermoViscoProblem:
         Update the total strain for the current timestep.
         c.f. Nielsen et al., Eq. 28
         """
-        self.total_strain.interpolate(self.total_expr)
+        self.functions["total_strain"].interpolate(
+            self.material_model.expressions["total_strain"]
+        )
 
         return
     
@@ -728,53 +510,81 @@ class ThermoViscoProblem:
         Update the total strain for the current timestep.
         c.f. Nielsen et al., Eq. 28
         """
-        self.deviatoric_strain.interpolate(self.deviatoric_expr)
+        self.functions["deviatoric_strain"].interpolate(
+            self.material_model.expressions["deviatoric_strain"]
+        )
 
         return
 
     def __update_T_next(self) -> None:
 
-        self.T_next.interpolate(self.T_next_expr)
+        self.functions_next["T"].interpolate(
+            self.material_model.expressions["T_next"]
+        )
 
         return
     
     def __update_phi(self) -> None:
-        self.phi_shift.interpolate(self.phi_shift_expr)
-        self.phi_shift_next.interpolate(self.phi_shift_next_expr)
+        self.functions["phi"].interpolate(
+            self.material_model.expressions["phi"])
+        self.functions_next["phi"].interpolate(
+            self.material_model.expressions["phi_next"]
+        )
 
         return
 
     
     def __update_shifted_time(self) -> None:
-        self.xi.interpolate(self.xi_expr)
+        self.functions["xi"].interpolate(
+            self.material_model.expressions["xi"]
+        )
 
         return
 
 
     def __update_deviatoric_stress(self) -> None:
-        self.ds_partial.interpolate(self.ds_partial_expr)
-        self.s_tilde_partial_next.interpolate(self.s_tilde_partial_next_expr)
-        self.s_partial_next.interpolate(self.s_partial_next_expr)
+        self.functions["ds_partial"].interpolate(
+            self.material_model.expressions["ds_partial"]
+        )
+        self.functions_next["s_tilde_partial"].interpolate(
+            self.material_model.expressions["s_tilde_partial_next"]
+        )
+        self.functions_next["s_partial"].interpolate(
+            self.material_model.expressions["s_partial_next"]
+        )
 
-        self._update_values(current=self.s_tilde_partial_next,previous=self.s_tilde_partial)
-        self._update_values(current=self.s_partial_next,previous=self.s_partial)
+        self._update_values(current=self.functions_next["s_tilde_partial"],previous=self.functions["s_tilde_partial"])
+        self._update_values(current=self.functions_next["s_partial"],previous=self.functions["s_partial"])
 
         return
     
     
     def __update_hydrostatic_stress(self) -> None:
-        self.dsigma_partial.interpolate(self.dsigma_partial_expr)
-        self.sigma_tilde_partial_next.interpolate(self.sigma_tilde_partial_next_expr)
-        self.sigma_partial_next.interpolate(self.sigma_partial_next_expr)
+        self.functions["dsigma_partial"].interpolate(
+            self.material_model.expressions["dsigma_partial"]
+        )
+        self.functions_next["sigma_tilde_partial"].interpolate(
+            self.material_model.expressions["sigma_tilde_partial_next"]
+        )
+        self.functions_next["sigma_partial"].interpolate(
+            self.material_model.expressions["sigma_partial_next"]
+        )
 
-        self._update_values(current=self.sigma_tilde_partial_next,previous=self.sigma_tilde_partial)
-        self._update_values(current=self.sigma_partial_next,previous=self.sigma_partial)
+        self._update_values(
+            current=self.functions_next["sigma_tilde_partial"],previous=self.functions["sigma_tilde_partial"]
+        )
+        self._update_values(
+            current=self.functions_next["sigma_partial"],
+            previous=self.functions["sigma_partial"]
+        )
 
         return
     
 
     def __update_total_stress(self) -> None:
-        self.sigma_next.interpolate(self.sigma_next_expr)
+        self.functions_next["sigma"].interpolate(
+            self.material_model.expressions["sigma_next"]
+        )
 
         return
 
