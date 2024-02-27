@@ -155,16 +155,19 @@ class ThermoViscoProblem:
                                    name="Deviatoric_stress_increment")
         self.functions["dsigma_partial"] = Function(self.functionSpaces["sigma_partial"],
                                        name="Hydrostatic_stress_increment")
-        self.functions["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions["s_tilde"] = Function(self.functionSpaces["sigma"])
+
+        self.functions_current["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions["s_tilde_next"] = Function(self.functionSpaces["sigma"])
-        self.functions["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
+
+        self.functions_current["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions["s_partial"] = Function(self.functionSpaces["sigma_partial"])
+
+        self.functions_current["s_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["s_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
+
+        self.functions_current["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
+
         self.functions_next["sigma"] = Function(self.functionSpaces["sigma"], name="Stress_tensor")
     
         return
@@ -553,8 +556,10 @@ class ThermoViscoProblem:
             self.material_model.expressions["s_partial_next"]
         )
 
-        self._update_values(current=self.functions_next["s_tilde_partial"],previous=self.functions["s_tilde_partial"])
-        self._update_values(current=self.functions_next["s_partial"],previous=self.functions["s_partial"])
+        self._update_values(current=self.functions_next["s_tilde_partial"],
+                            previous=self.functions_current["s_tilde_partial"])
+        self._update_values(current=self.functions_next["s_partial"],
+                            previous=self.functions_current["s_partial"])
 
         return
     
@@ -571,11 +576,12 @@ class ThermoViscoProblem:
         )
 
         self._update_values(
-            current=self.functions_next["sigma_tilde_partial"],previous=self.functions["sigma_tilde_partial"]
+            current=self.functions_next["sigma_tilde_partial"],
+            previous=self.functions_current["sigma_tilde_partial"]
         )
         self._update_values(
             current=self.functions_next["sigma_partial"],
-            previous=self.functions["sigma_partial"]
+            previous=self.functions_current["sigma_partial"]
         )
 
         return

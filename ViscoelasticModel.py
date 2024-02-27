@@ -175,30 +175,25 @@ class ViscoelasticModel:
         # Eq. 15a + 20
         self.expressions["ds_partial"] = Expression(
             ufl.as_tensor([
-                2.0 * lam_g_n * functions["deviatoric_strain"]/functions["xi"] *
-                lam_g_n * (1.0 - self._taylor_exponential(functions,lam_g_n))
-                for lam_g_n in self.lambda_g_n_tableau]),
+                2.0 * g_n * functions["deviatoric_strain"]/functions["xi"] *
+                lambda_g_n * (1.0 - self._taylor_exponential(functions,lambda_g_n))
+                for (lambda_g_n,g_n) in zip(self.lambda_g_n_tableau,self.g_n_tableau)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
 
         # Eq. 15b + 20
         self.expressions["dsigma_partial"] = Expression(
             ufl.as_tensor([
-                lam_k_n * sym(functions["total_strain"])/functions["xi"] *
-                lam_k_n * self._taylor_exponential(functions,lam_k_n)
-                for lam_k_n in self.lambda_k_n_tableau]),
+                k_n * (tr(functions["total_strain"])*self.I)/functions["xi"] *
+                lam_k_n * (1.0 - self._taylor_exponential(functions,lam_k_n))
+                for (lam_k_n,k_n) in zip(self.lambda_k_n_tableau,self.k_n_tableau)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
-
-        # Eq. 13
-        self.expressions["s_tilde_next"] = Expression(
-            inner(functions_next["s_partial"],functions_next["s_partial"]),
-            functionSpaces["sigma"].element.interpolation_points())
         
         # Eq. 16a
         _, i, j = ufl.indices(3)
         self.expressions["s_tilde_partial_next"] = Expression(ufl.as_tensor([
-            functions["s_tilde_partial"][n,i,j] * self._taylor_exponential(
+            functions_current["s_tilde_partial"][n,i,j] * self._taylor_exponential(
                 functions,self.lambda_g_n_tableau[n]) for n in range(0,self.tableau_size)
             ]),
             functionSpaces["sigma_partial"].element.interpolation_points()
@@ -207,7 +202,7 @@ class ViscoelasticModel:
         # Eq. 16b
         self.expressions["sigma_tilde_partial_next"] = Expression(
             ufl.as_tensor([
-                functions["sigma_tilde_partial"][n,i,j] * self._taylor_exponential(
+                functions_current["sigma_tilde_partial"][n,i,j] * self._taylor_exponential(
                     functions,self.lambda_k_n_tableau[n]) for n in range(0,self.tableau_size)
             ]),
             functionSpaces["sigma_partial"].element.interpolation_points()
