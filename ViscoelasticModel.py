@@ -81,6 +81,11 @@ class ViscoelasticModel:
         self.alpha_solid = Constant(mesh, model_parameters["alpha_solid"])
         # Liquid thermal expansion coefficient [K^-1]
         self.alpha_liquid = Constant(mesh, model_parameters["alpha_liquid"])
+        # Lame's elasticity parameters
+        self.lambda_= Constant(mesh, model_parameters["lambda_"])
+        self.mu = Constant(mesh, model_parameters["mu"])
+
+        
         return
     
     def _init_expressions(self,functions: dict, functions_next: dict,
@@ -191,9 +196,9 @@ class ViscoelasticModel:
         )
         
         # Eq. 16a
-        _, i, j = ufl.indices(3)
+        #_, i, j = ufl.indices(3)
         self.expressions["s_tilde_partial_next"] = Expression(ufl.as_tensor([
-            functions_current["s_tilde_partial"][n,i,j] * self._taylor_exponential(
+            functions_current["s_tilde_partial"][n,:,:] * self._taylor_exponential(
                 functions,self.lambda_g_n_tableau[n]) for n in range(0,self.tableau_size)
             ]),
             functionSpaces["sigma_partial"].element.interpolation_points()
@@ -202,7 +207,7 @@ class ViscoelasticModel:
         # Eq. 16b
         self.expressions["sigma_tilde_partial_next"] = Expression(
             ufl.as_tensor([
-                functions_current["sigma_tilde_partial"][n,i,j] * self._taylor_exponential(
+                functions_current["sigma_tilde_partial"][n,:,:] * self._taylor_exponential(
                     functions,self.lambda_k_n_tableau[n]) for n in range(0,self.tableau_size)
             ]),
             functionSpaces["sigma_partial"].element.interpolation_points()
