@@ -12,7 +12,7 @@ t_start = 0.0
 t_end = 50.0
 time = (0.0, 50.0)
 
-dt = 1.0
+dt = 0.1
 t = t_start
 problem_dim = 2
 
@@ -25,9 +25,10 @@ if create_new_mesh:
 fe_config = {
     "T":        {"element": "DG", "degree": 1},
     "sigma":    {"element": "CG", "degree": 1},
-    "displacement":    {"element": "CG", "degree": 1}
+    "U":    {"element": "CG", "degree": 1}
 }
 
+#marker = {
 model_params = {
     # Volumetric heat dissipation
     "f": 0.0,

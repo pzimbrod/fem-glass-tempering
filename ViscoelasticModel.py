@@ -139,7 +139,7 @@ class ViscoelasticModel:
     
         # Eq. 28
         self.expressions["total_strain"] = Expression(
-            - functions["thermal_strain"],
+            functions["mech_strain"] - functions["thermal_strain"],
             functionSpaces["sigma"].element.interpolation_points()
         )
 
@@ -231,7 +231,7 @@ class ViscoelasticModel:
                     n in range(0,self.tableau_size)]),
             functionSpaces["sigma"].element.interpolation_points()
         )
-
+        
         return
 
 
