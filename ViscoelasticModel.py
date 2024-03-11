@@ -5,6 +5,11 @@ import ufl
 from ufl import (inner, tr, sym, Identity)
 import numpy as np
 from math import factorial
+from ufl import (TestFunction,TrialFunction, FiniteElement, TensorElement,
+                 VectorElement, grad, inner,
+                 CellDiameter, avg, jump,
+                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity,dot, nabla_div)#, ds, dx
+
 
 class ViscoelasticModel:
     def __init__(self,mesh: Mesh, model_parameters: dict) -> None:
@@ -139,7 +144,7 @@ class ViscoelasticModel:
     
         # Eq. 28
         self.expressions["total_strain"] = Expression(
-            functions["mech_strain"] - functions["thermal_strain"],
+            functions["elastic_strain"] - functions["thermal_strain"],
             functionSpaces["sigma"].element.interpolation_points()
         )
 
@@ -147,6 +152,11 @@ class ViscoelasticModel:
         self.expressions["deviatoric_strain"] = Expression(
             # TODO: Find out if 1/3 applies for all dims
             functions["total_strain"] - 1/self.dim * self.I * tr(functions["total_strain"]),
+            functionSpaces["sigma"].element.interpolation_points()
+        )
+        
+        self.expressions["elastic_strain"] = Expression(
+            self.elastic_epsilon(functions["U"]),
             functionSpaces["sigma"].element.interpolation_points()
         )
 
@@ -227,6 +237,7 @@ class ViscoelasticModel:
 
         # Eq. 18
         self.expressions["sigma_next"] = Expression(
+            
             np.sum([functions_next["s_partial"][n,:,:] + functions_next["sigma_partial"][n,:,:] for
                     n in range(0,self.tableau_size)]),
             functionSpaces["sigma"].element.interpolation_points()
@@ -245,3 +256,9 @@ class ViscoelasticModel:
             np.sum([1.0/factorial(k)
             * (- functions["xi"]/lambda_value)**k for k in range(0,3)])
             )
+        
+    def elastic_epsilon(self,ua):
+        return sym(grad(ua)) 
+
+    def elastic_sigma(self,ua):
+        return self.lambda_ * (nabla_div(ua))* self.I + 2 * self.mu * self.elastic_epsilon(ua)
