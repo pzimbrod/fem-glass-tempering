@@ -87,7 +87,7 @@ class ViscoelasticModel:
         # Liquid thermal expansion coefficient [K^-1]
         self.alpha_liquid = Constant(mesh, model_parameters["alpha_liquid"])
         # Lame's elasticity parameters
-        self.lambda_= Constant(mesh, model_parameters["lambda_"])
+        self.E_glass= Constant(mesh, model_parameters["E_glass"])
         self.mu = Constant(mesh, model_parameters["mu"])
 
         
@@ -261,4 +261,4 @@ class ViscoelasticModel:
         return sym(grad(ua)) 
 
     def elastic_sigma(self,ua):
-        return self.lambda_ * (nabla_div(ua))* self.I + 2 * self.mu * self.elastic_epsilon(ua)
+        return (self.E_glass * self.mu / ((1 + self.mu)) * (1 - 2 * self.mu)) * (nabla_div(ua))* self.I + (2 * self.E_glass / (2 * (1 + self.mu))) * self.elastic_epsilon(ua)

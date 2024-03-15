@@ -17,6 +17,7 @@ t = t_start
 problem_dim = 2
 
 mesh_path = f"mesh{problem_dim}d.msh"
+
 create_new_mesh = True
 
 if create_new_mesh:
@@ -41,7 +42,7 @@ model_params = {
     "T_0": 923.1,
     # Convective heat transfer coefficient
     "alpha": 1.0,
-    "htc": 280.1,
+    "htc": 280.0,
     # Material density
     "rho": 2500.0,
     # Specific heat capacity
@@ -54,8 +55,8 @@ model_params = {
     "alpha_solid": 9.10e-6,
     "alpha_liquid": 25.10e-6,
     "Tf_init": 923.1,
-    "lambda_": 1.25,
-    "mu": 1.0,
+    "E_glass": 72e106,
+    "mu": 0.3,
 }
 
 model = ThermoViscoProblem(mesh_path=mesh_path,problem_dim=problem_dim,

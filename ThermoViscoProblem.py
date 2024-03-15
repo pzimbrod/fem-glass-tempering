@@ -9,7 +9,7 @@ from dolfinx.fem.petsc import NonlinearProblem
 from ufl import (TestFunction,TrialFunction, FiniteElement, TensorElement,
                  VectorElement, grad, inner,
                  CellDiameter, avg, jump,
-                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity,dot, nabla_div)#, ds, dx
+                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity, dot, nabla_div)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
 import numpy as np
@@ -21,6 +21,7 @@ from ThermalModel import ThermalModel
 from dolfinx import default_scalar_type
 from dolfinx.fem import Constant, Expression
 
+
 class ThermoViscoProblem:
     def __init__(self,mesh_path: str, problem_dim: int, time: tuple, 
                  dt: float, config: dict, model_parameters: dict,
@@ -29,7 +30,7 @@ class ThermoViscoProblem:
         self.dim = problem_dim
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=problem_dim)
-        
+        self.bc_markers = {"left": 0, "top": 1, "right": 2, "bottom": 3}  
         self.dt = dt
         # The time domain
         self.time = time
@@ -183,9 +184,7 @@ class ThermoViscoProblem:
         self.v_test = TestFunction(self.functionSpaces["U"])
         
         self.functions["elastic_strain"] = Function(self.functionSpaces["sigma"], name="Mechanical_strain")
-        
 
-    
         return
     
 
@@ -360,30 +359,40 @@ class ThermoViscoProblem:
         
     # linear elasticity equation #
     
+    def __get_boundary_dofs(self, fs: FunctionSpace, marker: str) -> np.ndarray:
+        # For mixed spaces, a mapping between collapsed and mixed space
+        facet_dim = self.mesh.topology.dim-1
+        return fem.locate_dofs_topological(V=fs,
+                                       entity_dim=facet_dim,
+                                       entities=self.facet_tags.find(self.bc_markers[marker]))
+    
     def _set_dirichlet_bc(self) -> None:
         
-        facet_dim = self.mesh.topology.dim-1
-        facets_l = locate_entities_boundary(self.mesh, dim=facet_dim, marker=lambda x: np.isclose(x[0], 0.0))
-        facets_r = locate_entities_boundary(self.mesh, dim=facet_dim, marker=lambda x: np.isclose(x[0], 50.0))
-        facets_t = locate_entities_boundary(self.mesh, dim=facet_dim, marker=lambda x: np.isclose(x[1], 0.0))
-        facets_b = locate_entities_boundary(self.mesh, dim=facet_dim, marker=lambda x: np.isclose(x[1], 10.0))
-        dofs_l = fem.locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=facets_l)
-        dofs_r = fem.locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=facets_r)
-        dofs_t = fem.locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=facets_t)
-        dofs_b = fem.locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=facets_b)
-        self.bc = [fem.dirichletbc(fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))), dofs_l, self.functionSpaces["U"]),
-                   #fem.dirichletbc(fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))), dofs_r, self.functionSpaces["U"]),
-                   fem.dirichletbc(fem.Constant(self.mesh, PETSc.ScalarType((0.0,-10e-3))), dofs_t, self.functionSpaces["U"]),
-                   fem.dirichletbc(fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))), dofs_b, self.functionSpaces["U"])
-                   ]
+        fs = self.functionSpaces["U"]
+        left_dofs = self.__get_boundary_dofs(fs=fs,marker="left")
+        top_dofs = self.__get_boundary_dofs(fs=fs,marker="top")
+        right_dofs = self.__get_boundary_dofs(fs=fs,marker="right")
+        bottom_dofs = self.__get_boundary_dofs(fs=fs,marker="bottom")
+        
+        bc_left = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=left_dofs)
+        bc_top = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.01))),dofs=top_dofs)
+        bc_right = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=right_dofs)
+        bc_bottom = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=bottom_dofs)
+        self.bc = [
+            bc_left,
+            bc_top,
+            #bc_right,
+            bc_bottom
+            ]
+
     
     def _setup_weak_form_u(self) -> None:
         
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
         
-        self.ss = Constant(self.mesh,default_scalar_type((0.0,0.0)))          # Body force
-        self.traction = Constant(self.mesh,default_scalar_type((0.0,1.0)))    # traction force
+        self.ss = Constant(self.mesh,default_scalar_type((0.0,1.0)))          # Body force
+        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.1)))    # traction force
 
         self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
         self.L = dot(self.ss, self.v_test) * dx + dot(self.traction,self.v_test) * ds
@@ -648,7 +657,6 @@ class ThermoViscoProblem:
         self.functions_next["sigma"].interpolate(
             self.material_model.expressions["sigma_next"]
         )
-
         return
     
     def __update_elastic_strain(self) -> None:

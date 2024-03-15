@@ -1,5 +1,6 @@
 import gmsh
 
+maker = {"left": 1, "top": 2, "right": 1, "bottom": 2}
 def create_mesh(path: str, dim: int):
     gmsh.initialize()
     gmsh.model.add(f"Glass {dim}D mesh")
@@ -26,27 +27,34 @@ def create_mesh(path: str, dim: int):
         gmsh.model.setPhysicalName(1, 0, "cells")
     
     elif dim == 2:
-        # Create more points for a refined rectangle
-        p1 = gmsh.model.occ.addPoint(0.0, 0.0, 0.0, resolution_fine)
-        p2 = gmsh.model.occ.addPoint(50.0, 0.0, 0.0, resolution_mid)
-        p3 = gmsh.model.occ.addPoint(50.0, 10.0, 0.0, resolution_fine)
-        p4 = gmsh.model.occ.addPoint(0.0, 10.0, 0.0, resolution_mid)
+        # Add points with finer resolution 
+        point_1 = gmsh.model.occ.add_point(0, 0, 0,resolution_mid,0)
+        point_2 = gmsh.model.occ.add_point(50, 0, 0,resolution_mid,1)
+        point_3 = gmsh.model.occ.add_point(50, 10, 0,resolution_mid,2)
+        point_4 = gmsh.model.occ.add_point(0, 10, 0,resolution_mid,3)
 
-        # Create a more refined rectangle
-        rect = gmsh.model.occ.addCurveLoop([
-            gmsh.model.occ.addLine(p1, p2),
-            gmsh.model.occ.addLine(p2, p3),
-            gmsh.model.occ.addLine(p3, p4),
-            gmsh.model.occ.addLine(p4, p1),
+        # Add lines between all points creating the rectangle
+        left_line = gmsh.model.occ.add_line(point_1, point_2,0)
+        top_line = gmsh.model.occ.add_line(point_2, point_3,1)
+        right_line = gmsh.model.occ.add_line(point_3, point_4,2)
+        bottom_line = gmsh.model.occ.add_line(point_4, point_1,3)
 
-        ])
-
-        gmsh.model.occ.addPlaneSurface([rect])
+        # Create a line loop and plane surface for meshing
+        lines_loop = gmsh.model.occ.add_curve_loop([left_line,top_line,right_line,bottom_line])
+        gmsh.model.occ.add_plane_surface([lines_loop])
 
         gmsh.model.occ.synchronize()
 
-        gmsh.model.addPhysicalGroup(2, [1], 0)
-        gmsh.model.setPhysicalName(1, 0, "cells")
+        left_BC, top_BC, right_BC, bottom_BC = 0, 1, 2, 3
+        gmsh.model.addPhysicalGroup(2, [left_line], left_BC)
+        gmsh.model.setPhysicalName(2, left_BC, "left")
+        gmsh.model.addPhysicalGroup(2, [top_line], top_BC)
+        gmsh.model.setPhysicalName(2, top_BC, "top")
+        gmsh.model.addPhysicalGroup(2, [right_line], right_BC)
+        gmsh.model.setPhysicalName(2, right_BC, "right")
+        gmsh.model.addPhysicalGroup(2, [bottom_line], bottom_BC)
+        gmsh.model.setPhysicalName(2, bottom_BC, "bottom")
+
 
     # Generate mesh
     gmsh.model.occ.synchronize()
