@@ -23,14 +23,16 @@ from dolfinx.fem import Constant, Expression
 
 
 class ThermoViscoProblem:
-    def __init__(self,mesh_path: str, problem_dim: int, time: tuple, 
+    def __init__(self,mesh_path: str, problem_dim: int, time: tuple,
                  dt: float, config: dict, model_parameters: dict,
                  jit_options: (dict|None) = None ) -> None:
-        
         self.dim = problem_dim
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=problem_dim)
-        self.bc_markers = {"left": 0, "top": 1, "right": 2, "bottom": 3}  
+        self.bc_maker_left = self.facet_tags.find(1)
+        self.bc_maker_top = self.facet_tags.find(2)
+        self.bc_maker_right = self.facet_tags.find(3)
+        self.bc_maker_bottom = self.facet_tags.find(4)
         self.dt = dt
         # The time domain
         self.time = time
@@ -359,30 +361,24 @@ class ThermoViscoProblem:
         
     # linear elasticity equation #
     
-    def __get_boundary_dofs(self, fs: FunctionSpace, marker: str) -> np.ndarray:
-        # For mixed spaces, a mapping between collapsed and mixed space
-        facet_dim = self.mesh.topology.dim-1
-        return fem.locate_dofs_topological(V=fs,
-                                       entity_dim=facet_dim,
-                                       entities=self.facet_tags.find(self.bc_markers[marker]))
-    
     def _set_dirichlet_bc(self) -> None:
         
         fs = self.functionSpaces["U"]
-        left_dofs = self.__get_boundary_dofs(fs=fs,marker="left")
-        top_dofs = self.__get_boundary_dofs(fs=fs,marker="top")
-        right_dofs = self.__get_boundary_dofs(fs=fs,marker="right")
-        bottom_dofs = self.__get_boundary_dofs(fs=fs,marker="bottom")
+        facet_dim = self.mesh.topology.dim-1
         
-        bc_left = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=left_dofs)
-        bc_top = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.01))),dofs=top_dofs)
-        bc_right = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=right_dofs)
-        bc_bottom = fem.dirichletbc(V=fs,value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=bottom_dofs)
+        left_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=fem.locate_dofs_topological(V=fs,
+                                       entity_dim=facet_dim,entities=self.bc_maker_left),V=fs)
+        top_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.01))),dofs=fem.locate_dofs_topological(V=fs,
+                                       entity_dim=facet_dim,entities=self.bc_maker_top),V=fs)
+        right_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=fem.locate_dofs_topological(V=fs,
+                                       entity_dim=facet_dim,entities=self.bc_maker_right),V=fs)
+        bottom_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=fem.locate_dofs_topological(V=fs,
+                                       entity_dim=facet_dim,entities=self.bc_maker_bottom),V=fs)
         self.bc = [
-            bc_left,
-            bc_top,
-            #bc_right,
-            bc_bottom
+            left_bc,
+            top_bc,
+            right_bc,
+            bottom_bc
             ]
 
     
@@ -391,8 +387,8 @@ class ThermoViscoProblem:
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
         
-        self.ss = Constant(self.mesh,default_scalar_type((0.0,1.0)))          # Body force
-        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.1)))    # traction force
+        self.ss = Constant(self.mesh,default_scalar_type((0.0,-1.0)))          # Body force
+        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.01)))    # traction force
 
         self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
         self.L = dot(self.ss, self.v_test) * dx + dot(self.traction,self.v_test) * ds

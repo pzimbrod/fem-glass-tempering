@@ -18,6 +18,7 @@ problem_dim = 2
 
 mesh_path = f"mesh{problem_dim}d.msh"
 
+
 create_new_mesh = True
 
 if create_new_mesh:
