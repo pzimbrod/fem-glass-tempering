@@ -41,8 +41,8 @@ model_params = {
     "T_ambient": 600.0,
     # Initial temperature
     "T_0": 923.1,
-    # Convective heat transfer coefficient
     "alpha": 1.0,
+    # Convective heat transfer coefficient (Controlling cooling rate)
     "htc": 280.0,
     # Material density
     "rho": 2500.0,
@@ -56,8 +56,8 @@ model_params = {
     "alpha_solid": 9.10e-6,
     "alpha_liquid": 25.10e-6,
     "Tf_init": 923.1,
-    "E_glass": 72e106,
-    "mu": 0.3,
+    "lambda_": 1.25,
+    "mu": 1.0,
 }
 
 model = ThermoViscoProblem(mesh_path=mesh_path,problem_dim=problem_dim,

@@ -1,15 +1,14 @@
 from dolfinx.mesh import locate_entities_boundary
 from mpi4py import MPI
-from dolfinx.mesh import locate_entities_boundary
 from dolfinx import fem, io
 from dolfinx.nls import petsc
 from dolfinx.io import gmshio
-from dolfinx.fem import (FunctionSpace, Function, Constant,)
+from dolfinx.fem import (FunctionSpace, Function, Constant, locate_dofs_geometrical, locate_dofs_topological)
 from dolfinx.fem.petsc import NonlinearProblem
 from ufl import (TestFunction,TrialFunction, FiniteElement, TensorElement,
                  VectorElement, grad, inner,
                  CellDiameter, avg, jump,
-                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity, dot, nabla_div)#, ds, dx
+                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity, dot, nabla_div, ds, dx)#
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
 import numpy as np
@@ -29,10 +28,10 @@ class ThermoViscoProblem:
         self.dim = problem_dim
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=problem_dim)
-        self.bc_maker_left = self.facet_tags.find(1)
-        self.bc_maker_top = self.facet_tags.find(2)
-        self.bc_maker_right = self.facet_tags.find(3)
-        self.bc_maker_bottom = self.facet_tags.find(4)
+        self.bc_maker_left = self.facet_tags.find(10)
+        self.bc_maker_top = self.facet_tags.find(11)
+        self.bc_maker_right = self.facet_tags.find(12)
+        self.bc_maker_bottom = self.facet_tags.find(13)
         self.dt = dt
         # The time domain
         self.time = time
@@ -178,6 +177,8 @@ class ThermoViscoProblem:
 
         self.functions_current["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
+        #self.functions["f2G"] = Function(self.functionSpaces["f2G"])
+        #self.functions["f2K"] = Function(self.functionSpaces["f2K"])
 
         self.functions_next["sigma"] = Function(self.functionSpaces["sigma"], name="Stress_tensor")
         
@@ -292,8 +293,9 @@ class ThermoViscoProblem:
     # Heat diffusion equation #
     
     def _setup_weak_form_T(self) -> None:
-        ds = Measure("exterior_facet",domain=self.mesh)
-        dx = Measure("dx",domain=self.mesh)
+        
+        #ds = Measure("exterior_facet",domain=self.mesh)
+        #dx = Measure("dx",domain=self.mesh)
 
         element_type = self.finiteElements["T"].family()
 
@@ -362,33 +364,28 @@ class ThermoViscoProblem:
     # linear elasticity equation #
     
     def _set_dirichlet_bc(self) -> None:
-        
-        fs = self.functionSpaces["U"]
+          
         facet_dim = self.mesh.topology.dim-1
         
-        left_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=fem.locate_dofs_topological(V=fs,
-                                       entity_dim=facet_dim,entities=self.bc_maker_left),V=fs)
-        top_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.01))),dofs=fem.locate_dofs_topological(V=fs,
-                                       entity_dim=facet_dim,entities=self.bc_maker_top),V=fs)
-        right_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=fem.locate_dofs_topological(V=fs,
-                                       entity_dim=facet_dim,entities=self.bc_maker_right),V=fs)
-        bottom_bc = fem.dirichletbc(value=fem.Constant(self.mesh, PETSc.ScalarType((0.0,0.0))),dofs=fem.locate_dofs_topological(V=fs,
-                                       entity_dim=facet_dim,entities=self.bc_maker_bottom),V=fs)
-        self.bc = [
-            left_bc,
-            top_bc,
-            right_bc,
-            bottom_bc
-            ]
-
+        left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_left)
+        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_top)
+        right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_right)
+        bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_bottom)
+        
+        
+        self.bc = [fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
+                   fem.dirichletbc(ScalarType([0.,0.01]), top_bc, self.functionSpaces["U"]),
+                   #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
+                   fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
+                   ]
     
     def _setup_weak_form_u(self) -> None:
         
-        ds = Measure("exterior_facet",domain=self.mesh)
-        dx = Measure("dx",domain=self.mesh)
+        #ds = Measure("exterior_facet",domain=self.mesh)
+        #dx = Measure("dx",domain=self.mesh)
         
         self.ss = Constant(self.mesh,default_scalar_type((0.0,-1.0)))          # Body force
-        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.01)))    # traction force
+        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))      # traction force no matter
 
         self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
         self.L = dot(self.ss, self.v_test) * dx + dot(self.traction,self.v_test) * ds

@@ -27,34 +27,33 @@ def create_mesh(path: str, dim: int):
     
     elif dim == 2:
         # Add points with finer resolution 
-        point_1 = gmsh.model.geo.add_point(0, 0, 0,resolution_mid)
-        point_2 = gmsh.model.geo.add_point(50, 0, 0,resolution_mid)
-        point_3 = gmsh.model.geo.add_point(50, 10, 0,resolution_mid)
-        point_4 = gmsh.model.geo.add_point(0, 10, 0,resolution_mid)
+        point_1 = gmsh.model.occ.add_point(0, 0, 0,resolution_mid)
+        point_2 = gmsh.model.occ.add_point(50, 0, 0,resolution_mid)
+        point_3 = gmsh.model.occ.add_point(50, 10, 0,resolution_mid)
+        point_4 = gmsh.model.occ.add_point(0, 10, 0,resolution_mid)
 
         # Add lines between all points creating the rectangle
-        left_line = gmsh.model.geo.add_line(point_1, point_4)
-        top_line = gmsh.model.geo.add_line(point_4, point_3)
-        right_line = gmsh.model.geo.add_line(point_3, point_2)
-        bottom_line = gmsh.model.geo.add_line(point_2, point_1)
+        left_line = gmsh.model.occ.add_line(point_1, point_4)
+        top_line = gmsh.model.occ.add_line(point_4, point_3)
+        right_line = gmsh.model.occ.add_line(point_3, point_2)
+        bottom_line = gmsh.model.occ.add_line(point_2, point_1)
 
         # Create a line loop and plane surface for meshing
-        lines_loop = gmsh.model.geo.add_curve_loop([left_line,top_line,right_line,bottom_line])
-        domain = gmsh.model.geo.add_plane_surface([lines_loop])
+        lines_loop = gmsh.model.occ.add_curve_loop([left_line,top_line,right_line,bottom_line])
+        domain = gmsh.model.occ.add_plane_surface([lines_loop])
 
         gmsh.model.occ.synchronize()
         
         gmsh.model.addPhysicalGroup(2, [domain], 0)
     
-        gmsh.model.addPhysicalGroup(1, [left_line], 1)
-        gmsh.model.addPhysicalGroup(1, [top_line], 2)
-        gmsh.model.addPhysicalGroup(1, [right_line], 3)
-        gmsh.model.addPhysicalGroup(1, [bottom_line], 4)
+        gmsh.model.addPhysicalGroup(1, [left_line], 10)
+        gmsh.model.addPhysicalGroup(1, [top_line], 11)
+        gmsh.model.addPhysicalGroup(1, [right_line], 12)
+        gmsh.model.addPhysicalGroup(1, [bottom_line], 13)        
 
-        
 
     # Generate mesh
-    gmsh.model.geo.synchronize()
+    gmsh.model.occ.synchronize()
     gmsh.model.mesh.generate(dim=dim)
     gmsh.write(path)
     

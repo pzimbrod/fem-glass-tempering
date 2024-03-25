@@ -20,7 +20,6 @@ class ViscoelasticModel:
         self.chi = 0.5
         self.tableau_size = 6
         self.dim = mesh.topology.dim
-
         self.m_n_tableau = Constant(mesh,[
             5.523e-2,
             8.205e-2,
@@ -60,6 +59,7 @@ class ViscoelasticModel:
             7.301e+0,
             1.347e+1,
             1.090e+1,
+            #7.5e+0
             
         ])
         self.lambda_k_n_tableau = Constant(mesh,[
@@ -69,6 +69,7 @@ class ViscoelasticModel:
             1.925e-2,
             1.199e-1,
             2.033e+0,
+            #1.0e+100
               # instead of Inf
         ])
 
@@ -87,7 +88,7 @@ class ViscoelasticModel:
         # Liquid thermal expansion coefficient [K^-1]
         self.alpha_liquid = Constant(mesh, model_parameters["alpha_liquid"])
         # Lame's elasticity parameters
-        self.E_glass= Constant(mesh, model_parameters["E_glass"])
+        self.lambda_= Constant(mesh, model_parameters["lambda_"])
         self.mu = Constant(mesh, model_parameters["mu"])
 
         
@@ -237,14 +238,11 @@ class ViscoelasticModel:
 
         # Eq. 18
         self.expressions["sigma_next"] = Expression(
-            
             np.sum([functions_next["s_partial"][n,:,:] + functions_next["sigma_partial"][n,:,:] for
                     n in range(0,self.tableau_size)]),
             functionSpaces["sigma"].element.interpolation_points()
         )
-        
         return
-
 
     def _taylor_exponential(self,functions: dict, lambda_value):
         """
@@ -261,4 +259,4 @@ class ViscoelasticModel:
         return sym(grad(ua)) 
 
     def elastic_sigma(self,ua):
-        return (self.E_glass * self.mu / ((1 + self.mu)) * (1 - 2 * self.mu)) * (nabla_div(ua))* self.I + (2 * self.E_glass / (2 * (1 + self.mu))) * self.elastic_epsilon(ua)
+        return self.lambda_ * (nabla_div(ua))* self.I + 2 * self.mu * self.elastic_epsilon(ua)
