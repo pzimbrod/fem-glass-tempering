@@ -373,8 +373,8 @@ class ThermoViscoProblem:
         bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_bottom)
         
         
-        self.bc = [fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
-                   fem.dirichletbc(ScalarType([0.,0.01]), top_bc, self.functionSpaces["U"]),
+        self.bc = [#fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
+                   fem.dirichletbc(ScalarType([0.,0.1]), top_bc, self.functionSpaces["U"]),
                    #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
                    fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
                    ]
@@ -384,7 +384,7 @@ class ThermoViscoProblem:
         #ds = Measure("exterior_facet",domain=self.mesh)
         #dx = Measure("dx",domain=self.mesh)
         
-        self.ss = Constant(self.mesh,default_scalar_type((0.0,-1.0)))          # Body force
+        self.ss = Constant(self.mesh,default_scalar_type((0.0,0.0)))          # Body force
         self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))      # traction force no matter
 
         self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
@@ -600,7 +600,6 @@ class ThermoViscoProblem:
         self.functions["xi"].interpolate(
             self.material_model.expressions["xi"]
         )
-
         return
 
 

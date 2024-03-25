@@ -66,3 +66,4 @@ model = ThermoViscoProblem(mesh_path=mesh_path,problem_dim=problem_dim,
 
 model.setup(dirichlet_bc=True)
 model.solve()
+
