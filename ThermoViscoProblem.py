@@ -28,10 +28,7 @@ class ThermoViscoProblem:
         self.dim = problem_dim
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=problem_dim)
-        self.bc_maker_left = self.facet_tags.find(10)
-        self.bc_maker_top = self.facet_tags.find(11)
-        self.bc_maker_right = self.facet_tags.find(12)
-        self.bc_maker_bottom = self.facet_tags.find(13)
+        self.__init_boundary_markers()
         self.dt = dt
         # The time domain
         self.time = time
@@ -58,6 +55,17 @@ class ThermoViscoProblem:
             dt=self.dt)
 
         self.jit_options = jit_options
+
+        return
+    
+
+    def __init_boundary_markers(self) -> None:
+        self.bc_markers = {}
+        self.bc_markers["left"]     = self.facet_tags.find(10)
+        self.bc_markers["right"]    = self.facet_tags.find(12)
+        if self.dim == 2:
+            self.bc_markers["top"]      = self.facet_tags.find(11)
+            self.bc_markers["bottom"]   = self.facet_tags.find(13)
 
         return
     
@@ -367,10 +375,10 @@ class ThermoViscoProblem:
           
         facet_dim = self.mesh.topology.dim-1
         
-        left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_left)
-        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_top)
-        right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_right)
-        bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_bottom)
+        left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["left"])
+        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["top"])
+        right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["right"])
+        bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["bottom"])
         
         
         self.bc = [#fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
