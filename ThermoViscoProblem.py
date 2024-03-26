@@ -375,15 +375,10 @@ class ThermoViscoProblem:
           
         facet_dim = self.mesh.topology.dim-1
         
-        left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["left"])
-        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["top"])
-        right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["right"])
         bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["bottom"])
         
         
-        self.bc = [#fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
-                   fem.dirichletbc(ScalarType([0.,0.1]), top_bc, self.functionSpaces["U"]),
-                   #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
+        self.bc = [
                    fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
                    ]
     
