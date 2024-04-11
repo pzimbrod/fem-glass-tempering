@@ -28,10 +28,7 @@ class ThermoViscoProblem:
         self.dim = problem_dim
         self.mesh, self.cell_tags, self.facet_tags = gmshio.read_from_msh(
             mesh_path, MPI.COMM_WORLD, 0, gdim=problem_dim)
-        self.bc_maker_left = self.facet_tags.find(10)
-        self.bc_maker_top = self.facet_tags.find(11)
-        self.bc_maker_right = self.facet_tags.find(12)
-        self.bc_maker_bottom = self.facet_tags.find(13)
+        self.__init_boundary_markers()
         self.dt = dt
         # The time domain
         self.time = time
@@ -58,6 +55,17 @@ class ThermoViscoProblem:
             dt=self.dt)
 
         self.jit_options = jit_options
+
+        return
+    
+
+    def __init_boundary_markers(self) -> None:
+        self.bc_markers = {}
+        self.bc_markers["left"]     = self.facet_tags.find(10)
+        self.bc_markers["right"]    = self.facet_tags.find(12)
+        if self.dim == 2:
+            self.bc_markers["top"]      = self.facet_tags.find(11)
+            self.bc_markers["bottom"]   = self.facet_tags.find(13)
 
         return
     
@@ -163,30 +171,31 @@ class ThermoViscoProblem:
         # Stresses
         self.functions["ds_partial"] = Function(self.functionSpaces["sigma_partial"],
                                    name="Deviatoric_stress_increment")
-        self.functions["dsigma_partial"] = Function(self.functionSpaces["sigma_partial"],
+        self.functions["dsigma_partial"] = Function(self.functionSpaces["Tf_partial"],
                                        name="Hydrostatic_stress_increment")
 
         self.functions_current["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
 
-        self.functions_current["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions_next["sigma_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
+        self.functions_current["sigma_tilde_partial"] = Function(self.functionSpaces["Tf_partial"])
+        self.functions_next["sigma_tilde_partial"] = Function(self.functionSpaces["Tf_partial"])
 
         self.functions_current["s_partial"] = Function(self.functionSpaces["sigma_partial"])
         self.functions_next["s_partial"] = Function(self.functionSpaces["sigma_partial"])
 
-        self.functions_current["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
-        self.functions_next["sigma_partial"] = Function(self.functionSpaces["sigma_partial"])
-        #self.functions["f2G"] = Function(self.functionSpaces["f2G"])
-        #self.functions["f2K"] = Function(self.functionSpaces["f2K"])
+        self.functions_current["sigma_partial"] = Function(self.functionSpaces["Tf_partial"])
+        self.functions_next["sigma_partial"] = Function(self.functionSpaces["Tf_partial"])
 
         self.functions_next["sigma"] = Function(self.functionSpaces["sigma"], name="Stress_tensor")
+        self.functions_next["total_d_partial"] = Function(self.functionSpaces["sigma"])
+        self.functions_next["total_tilde_partial"] = Function(self.functionSpaces["sigma"])
         
         self.functions["U"] = Function(self.functionSpaces["U"], name="Displacement")
         self.u_trial = TrialFunction(self.functionSpaces["U"])
         self.v_test = TestFunction(self.functionSpaces["U"])
         
         self.functions["elastic_strain"] = Function(self.functionSpaces["sigma"], name="Mechanical_strain")
+        self.functions["elastic_stress"] = Function(self.functionSpaces["sigma"], name="Mechanical_strain")
 
         return
     
@@ -274,6 +283,15 @@ class ThermoViscoProblem:
             # Displacements
             io.VTXWriter(self.mesh.comm,"output/u.bp",
                          [self.functions["U"]],engine="BP4"),
+            # Viscoelastic part 
+            io.VTXWriter(self.mesh.comm,"output/total_d.bp",
+                         [self.functions_next["total_d_partial"]],engine="BP4"),
+            # Structural relaxation part
+            io.VTXWriter(self.mesh.comm,"output/total_tilda.bp",
+                         [self.functions_next["total_tilde_partial"]],engine="BP4"),
+            # Elastic loading
+            io.VTXWriter(self.mesh.comm,"output/elastic_stress.bp",
+                         [self.functions["elastic_stress"]],engine="BP4"),
 
         ]
         
@@ -367,16 +385,16 @@ class ThermoViscoProblem:
           
         facet_dim = self.mesh.topology.dim-1
         
-        left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_left)
-        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_top)
-        right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_right)
-        bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_maker_bottom)
+        left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["left"])
+        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["top"])
+        right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["right"])
+        bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["bottom"])
         
         
-        self.bc = [#fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
-                   fem.dirichletbc(ScalarType([0.,0.1]), top_bc, self.functionSpaces["U"]),
-                   #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
-                   fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
+        self.bc = [ #fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
+                    #fem.dirichletbc(ScalarType([0.,0.1]), top_bc, self.functionSpaces["U"]),
+                    #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
+                    fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
                    ]
     
     def _setup_weak_form_u(self) -> None:
@@ -385,7 +403,7 @@ class ThermoViscoProblem:
         #dx = Measure("dx",domain=self.mesh)
         
         self.ss = Constant(self.mesh,default_scalar_type((0.0,0.0)))          # Body force
-        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))      # traction force no matter
+        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))      # traction force 
 
         self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
         self.L = dot(self.ss, self.v_test) * dx + dot(self.traction,self.v_test) * ds
@@ -648,6 +666,15 @@ class ThermoViscoProblem:
     def __update_total_stress(self) -> None:
         self.functions_next["sigma"].interpolate(
             self.material_model.expressions["sigma_next"]
+        )
+        self.functions_next["total_d_partial"].interpolate(
+            self.material_model.expressions["total_d_partial"]
+        )
+        self.functions_next["total_tilde_partial"].interpolate(
+            self.material_model.expressions["total_tilde_partial"]
+        )
+        self.functions["elastic_stress"].interpolate(
+            self.material_model.expressions["elastic_stress"]
         )
         return
     
