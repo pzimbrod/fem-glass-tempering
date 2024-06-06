@@ -8,7 +8,7 @@ from dolfinx.fem.petsc import NonlinearProblem
 from ufl import (TestFunction,TrialFunction, FiniteElement, TensorElement,
                  VectorElement, grad, inner,
                  CellDiameter, avg, jump,
-                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity, dot, nabla_div, ds, dx)#
+                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity, dot, nabla_div)#, ds, dx
 from petsc4py.PETSc import ScalarType
 from petsc4py import PETSc
 import numpy as np
@@ -187,15 +187,20 @@ class ThermoViscoProblem:
         self.functions_next["sigma_partial"] = Function(self.functionSpaces["Tf_partial"])
 
         self.functions_next["sigma"] = Function(self.functionSpaces["sigma"], name="Stress_tensor")
-        self.functions_next["total_d_partial"] = Function(self.functionSpaces["sigma"])
-        self.functions_next["total_tilde_partial"] = Function(self.functionSpaces["sigma"])
+        self.functions_next["total_d_partial"] = Function(self.functionSpaces["sigma"], name="Viscoelastic_part")
+        self.functions_next["total_tilde_partial"] = Function(self.functionSpaces["sigma"], name="Structural_relaxation")
         
         self.functions["U"] = Function(self.functionSpaces["U"], name="Displacement")
         self.u_trial = TrialFunction(self.functionSpaces["U"])
         self.v_test = TestFunction(self.functionSpaces["U"])
         
         self.functions["elastic_strain"] = Function(self.functionSpaces["sigma"], name="Mechanical_strain")
-        self.functions["elastic_stress"] = Function(self.functionSpaces["sigma"], name="Mechanical_strain")
+        self.functions["elastic_stress"] = Function(self.functionSpaces["sigma"], name="Mechanical_stress")
+        #self.functions["elastic_epsilon"] = Function(self.functionSpaces["sigma"], name="elastic_strain")
+        #self.functions["elastic_sigma"] = Function(self.functionSpaces["sigma"], name="elastic_stress")
+        
+        self.functions["A"] = Function(self.functionSpaces["T"])
+        self.functions["B"] = Function(self.functionSpaces["T"])
 
         return
     
@@ -312,8 +317,8 @@ class ThermoViscoProblem:
     
     def _setup_weak_form_T(self) -> None:
         
-        #ds = Measure("exterior_facet",domain=self.mesh)
-        #dx = Measure("dx",domain=self.mesh)
+        ds = Measure("exterior_facet",domain=self.mesh)
+        dx = Measure("dx",domain=self.mesh)
 
         element_type = self.finiteElements["T"].family()
 
@@ -392,21 +397,21 @@ class ThermoViscoProblem:
         
         
         self.bc = [ #fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
-                    #fem.dirichletbc(ScalarType([0.,0.1]), top_bc, self.functionSpaces["U"]),
+                    fem.dirichletbc(ScalarType([0.,0.]), top_bc, self.functionSpaces["U"]),
                     #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
                     fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
                    ]
     
     def _setup_weak_form_u(self) -> None:
         
-        #ds = Measure("exterior_facet",domain=self.mesh)
-        #dx = Measure("dx",domain=self.mesh)
+        ds = Measure("exterior_facet",domain=self.mesh)
+        dx = Measure("dx",domain=self.mesh)
         
-        self.ss = Constant(self.mesh,default_scalar_type((0.0,0.0)))          # Body force
-        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))      # traction force 
+        self.ss = Constant(self.mesh,default_scalar_type((0.5,1.0)))          # Body force  (ex = 2ey)
+        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))    # traction force 
 
-        self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
-        self.L = dot(self.ss, self.v_test) * dx + dot(self.traction,self.v_test) * ds
+        self.a = inner(self.material_model.elastic_sigma(self.functions["A"],self.functions["B"],self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
+        self.L = dot(self.ss, self.v_test) * dx  + dot(self.traction,self.v_test) * ds # + dot(self.ss2, self.v_test) * dx
         
         
     def _setup_solver_u(self) -> None:
@@ -676,11 +681,18 @@ class ThermoViscoProblem:
         self.functions["elastic_stress"].interpolate(
             self.material_model.expressions["elastic_stress"]
         )
+
         return
     
     def __update_elastic_strain(self) -> None:
         self.functions["elastic_strain"].interpolate(
             self.material_model.expressions["elastic_strain"]
+        )
+        self.functions["A"].interpolate(
+            self.material_model.expressions["A"]
+        )
+        self.functions["B"].interpolate(
+            self.material_model.expressions["B"]
         )
 
         return
@@ -709,3 +721,4 @@ class ThermoViscoProblem:
         self.outfile_sigma.close()
 
         return
+
