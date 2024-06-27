@@ -174,3 +174,4 @@ cython_debug/
 **/*.xdmf
 *.bp
 **/*.bp
+*.csv
