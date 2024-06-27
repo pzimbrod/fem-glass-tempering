@@ -90,8 +90,6 @@ class ViscoelasticModel:
         # Lame's elasticity parameters
         self.lambda_= Constant(mesh, model_parameters["lambda_"])
         self.mu = Constant(mesh, model_parameters["mu"])
-
-        
         return
     
     def _init_expressions(self,functions: dict, functions_next: dict,
@@ -163,7 +161,7 @@ class ViscoelasticModel:
         )
         # Summation of elastic loading - curve a in fig. 4
         self.expressions["elastic_stress"] = Expression(
-            self.elastic_sigma(functions["A"], functions["B"], functions["U"]),
+            self.elastic_sigma(functions["U"]),
             functionSpaces["sigma"].element.interpolation_points()
         )
 
@@ -298,7 +296,6 @@ class ViscoelasticModel:
     def elastic_epsilon(self,ua):
         return sym(grad(ua)) 
 
-    def elastic_sigma(self,A,B,ua):
-        return ufl.as_matrix(((self.stiffness_matrix(A, B)[0, 0] * self.elastic_epsilon(ua)[0, 0] + self.stiffness_matrix(A, B)[0, 1] * self.elastic_epsilon(ua)[1, 1], self.stiffness_matrix(A, B)[2, 2] * self.elastic_epsilon(ua)[0, 1]),
-                      (self.stiffness_matrix(A, B)[2, 2] * self.elastic_epsilon(ua)[0, 1], self.stiffness_matrix(A, B)[1, 1] * self.elastic_epsilon(ua)[1, 1] + self.stiffness_matrix(A, B)[1, 0] * self.elastic_epsilon(ua)[0, 0])))
+    def elastic_sigma(self,ua):
+        return self.lambda_ * tr(self.elastic_epsilon(ua))* self.I + 2 * self.mu * self.elastic_epsilon(ua)
 

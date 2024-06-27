@@ -205,12 +205,12 @@ class ThermoViscoProblem:
         return
     
 
-    def setup(self, dirichlet_bc: bool = True,
+    def setup(self, dirichlet_bc_mech: bool = True,
               outfile_T: str = "visco",
               outfile_sigma: str = "stresses") -> None:
         self._set_initial_condition(temp_value=self.material_model.T_init)
-        if dirichlet_bc:
-            self._set_dirichlet_bc()
+        if dirichlet_bc_mech:
+            self._set_dirichlet_bc_mech()
         self._write_initial_output(t=self.t)
         self._setup_weak_form_T()
         self._setup_solver_T()
@@ -280,23 +280,23 @@ class ThermoViscoProblem:
             #io.VTXWriter(self.mesh.comm,"output/Tf_partial.bp",
             #             [self.functions_current["Tf_partial"]],engine="BP4"),
             # thermal strain
-            io.VTXWriter(self.mesh.comm,"output/eth.bp",
-                         [self.functions["thermal_strain"]],engine="BP4"),
+            #io.VTXWriter(self.mesh.comm,"output/eth.bp",
+            #             [self.functions["thermal_strain"]],engine="BP4"),
             # Shifted time
             io.VTXWriter(self.mesh.comm,"output/xi.bp",
                          [self.functions["xi"]],engine="BP4"),
             # Displacements
-            io.VTXWriter(self.mesh.comm,"output/u.bp",
-                         [self.functions["U"]],engine="BP4"),
+            #io.VTXWriter(self.mesh.comm,"output/u.bp",
+            #             [self.functions["U"]],engine="BP4"),
             # Viscoelastic part 
-            io.VTXWriter(self.mesh.comm,"output/total_d.bp",
-                         [self.functions_next["total_d_partial"]],engine="BP4"),
+            #io.VTXWriter(self.mesh.comm,"output/total_d.bp",
+            #             [self.functions_next["total_d_partial"]],engine="BP4"),
             # Structural relaxation part
-            io.VTXWriter(self.mesh.comm,"output/total_tilda.bp",
-                         [self.functions_next["total_tilde_partial"]],engine="BP4"),
+            #io.VTXWriter(self.mesh.comm,"output/total_tilda.bp",
+            #             [self.functions_next["total_tilde_partial"]],engine="BP4"),
             # Elastic loading
-            io.VTXWriter(self.mesh.comm,"output/elastic_stress.bp",
-                         [self.functions["elastic_stress"]],engine="BP4"),
+            #io.VTXWriter(self.mesh.comm,"output/elastic_strain.bp",
+            #             [self.functions["elastic_strain"]],engine="BP4"),
 
         ]
         
@@ -309,12 +309,19 @@ class ThermoViscoProblem:
                                          "output/sigma.xdmf", "w")
         self.outfile_sigma.write_mesh(self.mesh)
         self.outfile_sigma.write_function(self.functions_next["sigma"], t)
+        self.outfile_e_strain= io.XDMFFile(self.mesh.comm, 
+                                         "output/e_strain.xdmf", "w")
+        self.outfile_e_strain.write_mesh(self.mesh)
+        self.outfile_e_strain.write_function(self.functions["elastic_strain"], t)
+        self.outfile_t_strain= io.XDMFFile(self.mesh.comm, 
+                                         "output/t_strain.xdmf", "w")
+        self.outfile_t_strain.write_mesh(self.mesh)
+        self.outfile_t_strain.write_function(self.functions["total_strain"], t)
 
 
         return
 
     # Heat diffusion equation #
-    
     def _setup_weak_form_T(self) -> None:
         
         ds = Measure("exterior_facet",domain=self.mesh)
@@ -365,7 +372,6 @@ class ThermoViscoProblem:
 
         return
     
-
     def _setup_solver_T(self) -> None:
         self.prob = NonlinearProblem(F=self.F,u=self.functions_current["T"],
                                                jit_options=self.jit_options)
@@ -386,20 +392,20 @@ class ThermoViscoProblem:
         
     # linear elasticity equation #
     
-    def _set_dirichlet_bc(self) -> None:
+    def _set_dirichlet_bc_mech(self) -> None:
           
         facet_dim = self.mesh.topology.dim-1
         
         left_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["left"])
-        top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["top"])
+        #top_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["top"])
         right_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["right"])
-        bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["bottom"])
+        #bottom_bc = locate_dofs_topological(V=self.functionSpaces["U"], entity_dim=facet_dim, entities=self.bc_markers["bottom"])
         
         
-        self.bc = [ #fem.dirichletbc(ScalarType([0.,0.]), left_bc, self.functionSpaces["U"]),
-                    fem.dirichletbc(ScalarType([0.,0.]), top_bc, self.functionSpaces["U"]),
-                    #fem.dirichletbc(ScalarType([0.,0.]), right_bc, self.functionSpaces["U"]),
-                    fem.dirichletbc(ScalarType([0.,0.]), bottom_bc, self.functionSpaces["U"])
+        self.bc = [ fem.dirichletbc(ScalarType([0.]), left_bc, self.functionSpaces["U"]),
+                    #fem.dirichletbc(ScalarType([0.]), top_bc, self.functionSpaces["U"]),
+                    fem.dirichletbc(ScalarType([0.]), right_bc, self.functionSpaces["U"]),
+                    #fem.dirichletbc(ScalarType([0.]), bottom_bc, self.functionSpaces["U"])
                    ]
     
     def _setup_weak_form_u(self) -> None:
@@ -407,11 +413,11 @@ class ThermoViscoProblem:
         ds = Measure("exterior_facet",domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
         
-        self.ss = Constant(self.mesh,default_scalar_type((0.5,1.0)))          # Body force  (ex = 2ey)
-        self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))    # traction force 
+        self.ss = Constant(self.mesh,ScalarType([0.]),)          # Body force  (ex = 2ey)
+        #self.traction = Constant(self.mesh,default_scalar_type((0.0,0.0)))    # traction force 
 
-        self.a = inner(self.material_model.elastic_sigma(self.functions["A"],self.functions["B"],self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx 
-        self.L = dot(self.ss, self.v_test) * dx  + dot(self.traction,self.v_test) * ds # + dot(self.ss2, self.v_test) * dx
+        self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx
+        self.L = dot(self.ss, self.v_test) * dx  #+ dot(self.traction,self.v_test) * ds # + dot(self.ss2, self.v_test) * dx
         
         
     def _setup_solver_u(self) -> None:
@@ -431,6 +437,8 @@ class ThermoViscoProblem:
             file.write(t=self.t)
         
         self.outfile_sigma.write_function(self.functions_next["sigma"], self.t)
+        self.outfile_e_strain.write_function(self.functions["elastic_strain"], self.t)
+        self.outfile_t_strain.write_function(self.functions["total_strain"], self.t)
 
         return
     
@@ -443,6 +451,11 @@ class ThermoViscoProblem:
         self._solve_strains()
         self._solve_shifted_time()
         self._solve_stress()
+        self.avg_T.append([np.average(self.functions_current["T"].x.array[:])])
+        self.avg_phi.append([np.average(self.functions["phi"].x.array[:])])
+        self.avg_xi.append([np.average(self.functions["xi"].x.array[:])])
+        self.avg_t_epsilon.append([np.average(self.functions["total_strain"].x.array[:])])
+        self.avg_t_sigma.append([np.average(self.functions_next["sigma"].x.array[:])])
         self._write_output()
         
         # For some computations, functions_previous["T"] and functions_previous["displacement"] is needed
@@ -698,7 +711,13 @@ class ThermoViscoProblem:
         return
 
 
+
     def solve(self) -> None:
+        self.avg_T= []
+        self.avg_phi= []
+        self.avg_xi= []
+        self.avg_t_epsilon= []
+        self.avg_t_sigma= []
         if self.mesh.comm.rank == 0:
             print("Starting solve")
             t_start = time()
