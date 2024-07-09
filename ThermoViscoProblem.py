@@ -157,11 +157,14 @@ class ThermoViscoProblem:
         self.functions_current["Tf"] = Function(self.functionSpaces["T"], name="Fictive_Temperature") 
 
         # Shift function
-        self.functions["phi"] = Function(self.functionSpaces["T"], name="Shift_function")
-        self.functions["phi"] = Function(self.functionSpaces["T"])
+        self.functions["phi_v"] = Function(self.functionSpaces["T"], name="Shift_function")
+        self.functions_previous["phi_v"] = Function(self.functionSpaces["T"], name="Shift_function")
+        self.functions_previous["phi"] = Function(self.functionSpaces["T"])
+        self.functions_current["phi"] = Function(self.functionSpaces["T"])
         self.functions_next["phi"] = Function(self.functionSpaces["T"])
         # Shifted time
         self.functions["xi"] = Function(self.functionSpaces["T"], name="Shifted_time")
+        self.functions_previous["xi"] = Function(self.functionSpaces["T"], name="Shifted_time")
 
         # Strains
         self.functions["thermal_strain"] = Function(self.functionSpaces["sigma"], name="thermal_strain")
@@ -172,6 +175,10 @@ class ThermoViscoProblem:
         self.functions["ds_partial"] = Function(self.functionSpaces["sigma_partial"],
                                    name="Deviatoric_stress_increment")
         self.functions["dsigma_partial"] = Function(self.functionSpaces["Tf_partial"],
+                                       name="Hydrostatic_stress_increment")
+        self.functions_previous["ds_partial"] = Function(self.functionSpaces["sigma_partial"],
+                                   name="Deviatoric_stress_increment")
+        self.functions_previous["dsigma_partial"] = Function(self.functionSpaces["Tf_partial"],
                                        name="Hydrostatic_stress_increment")
 
         self.functions_current["s_tilde_partial"] = Function(self.functionSpaces["sigma_partial"])
@@ -215,7 +222,7 @@ class ThermoViscoProblem:
         self._setup_weak_form_T()
         self._setup_solver_T()
         self._setup_weak_form_u()
-        self._setup_solver_u()
+        #self._setup_solver_u()
 
 
     def _set_initial_condition(self, temp_value: float) -> None:
@@ -271,8 +278,10 @@ class ThermoViscoProblem:
             io.VTXWriter(self.mesh.comm,"output/T.bp",
                          [self.functions_current["T"]],engine="BP4"),
             # Shift function
+            io.VTXWriter(self.mesh.comm,"output/phi_v.bp",
+                         [self.functions["phi_v"]],engine="BP4"),
             io.VTXWriter(self.mesh.comm,"output/phi.bp",
-                         [self.functions["phi"]],engine="BP4"),
+                         [self.functions_current["phi"]],engine="BP4"),
             # Fictive temperature
             io.VTXWriter(self.mesh.comm,"output/Tf.bp",
                          [self.functions_current["Tf"]],engine="BP4"),
@@ -322,6 +331,7 @@ class ThermoViscoProblem:
         return
 
     # Heat diffusion equation #
+
     def _setup_weak_form_T(self) -> None:
         
         ds = Measure("exterior_facet",domain=self.mesh)
@@ -446,13 +456,14 @@ class ThermoViscoProblem:
     def solve_timestep(self,t) -> None:
         print(f"t={self.t}")
         self._solve_T()
-        self._solve_u()
+        #self._solve_u()
         self._solve_Tf()
         self._solve_strains()
         self._solve_shifted_time()
         self._solve_stress()
         self.avg_T.append([np.average(self.functions_current["T"].x.array[:])])
-        self.avg_phi.append([np.average(self.functions["phi"].x.array[:])])
+        self.avg_phi_v.append([np.average(self.functions["phi_v"].x.array[:])])
+        self.avg_phi.append([np.average(self.functions_current["phi"].x.array[:])])
         self.avg_xi.append([np.average(self.functions["xi"].x.array[:])])
         self.avg_t_epsilon.append([np.average(self.functions["total_strain"].x.array[:])])
         self.avg_t_sigma.append([np.average(self.functions_next["sigma"].x.array[:])])
@@ -460,8 +471,7 @@ class ThermoViscoProblem:
         
         # For some computations, functions_previous["T"] and functions_previous["displacement"] is needed
         # thus, we update only at the end of each timestep
-        self._update_values(current=self.functions_current["T"],
-                            previous=self.functions_previous["T"])
+
         #self._update_values(current=self.functions_current["displacement"],previous=self.functions_previous["displacement"])
         
         return
@@ -474,6 +484,10 @@ class ThermoViscoProblem:
         """
         _, converged = self.solver.solve(self.functions_current["T"])
         assert(converged)
+        self._update_values(current=self.functions_current["T"],
+                            previous=self.functions_previous["T"])
+        
+
         return
     
     def _solve_u(self) -> None:
@@ -550,7 +564,9 @@ class ThermoViscoProblem:
 
 
     def __update_shift_function(self) -> None:
-        self.functions["phi"].interpolate(self.material_model.expressions["phi"])
+        self.functions["phi_v"].interpolate(self.material_model.expressions["phi_v"])
+        self._update_values(current=self.functions["phi_v"],
+                            previous=self.functions_previous["phi_v"])
 
         return
 
@@ -618,17 +634,17 @@ class ThermoViscoProblem:
 
     def __update_T_next(self) -> None:
 
-        self.functions_next["T"].interpolate(
-            self.material_model.expressions["T_next"]
-        )
-
+        self.functions_next["T"].interpolate(self.material_model.expressions["T_next"])
+        #self._update_values(current=self.functions_next["T"],previous=self.functions_current["T"])
+        
         return
     
     def __update_phi(self) -> None:
-        self.functions["phi"].interpolate(self.material_model.expressions["phi"])
-        self.functions_next["phi"].interpolate(self.material_model.expressions["phi_next"]
-        )
-
+        #self.functions_previous["phi"].interpolate(self.material_model.expressions["phi_previous"])
+        self.functions_current["phi"].interpolate(self.material_model.expressions["phi_current"])
+        self.functions_next["phi"].interpolate(self.material_model.expressions["phi_next"])
+        self._update_values(current=self.functions_next["phi"],
+                            previous=self.functions_current["phi"])
         return
 
     
@@ -636,12 +652,16 @@ class ThermoViscoProblem:
         self.functions["xi"].interpolate(
             self.material_model.expressions["xi"]
         )
+        self._update_values(current=self.functions["xi"], previous=self.functions_previous["xi"])
         return
 
 
     def __update_deviatoric_stress(self) -> None:
         self.functions["ds_partial"].interpolate(
             self.material_model.expressions["ds_partial"]
+        )
+        self.functions["dsigma_partial"].interpolate(
+            self.material_model.expressions["dsigma_partial"]
         )
         self.functions_next["s_tilde_partial"].interpolate(
             self.material_model.expressions["s_tilde_partial_next"]
@@ -654,6 +674,8 @@ class ThermoViscoProblem:
                             previous=self.functions_current["s_tilde_partial"])
         self._update_values(current=self.functions_next["s_partial"],
                             previous=self.functions_current["s_partial"])
+        #self._update_values(current=self.functions["ds_partial"],previous=self.functions_previous["ds_partial"])
+        #self._update_values(current=self.functions["dsigma_partial"],previous=self.functions_previous["dsigma_partial"])
 
         return
     
@@ -714,6 +736,7 @@ class ThermoViscoProblem:
 
     def solve(self) -> None:
         self.avg_T= []
+        self.avg_phi_v= []
         self.avg_phi= []
         self.avg_xi= []
         self.avg_t_epsilon= []

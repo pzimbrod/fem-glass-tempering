@@ -106,7 +106,7 @@ class ViscoelasticModel:
         self.expressions = {}
 
         # Eq. 25
-        self.expressions["phi"] = Expression(
+        self.expressions["phi_v"] = Expression(
             ufl.exp(
             self.H / self.Rg * (
                 1.0 / self.Tb
@@ -120,8 +120,8 @@ class ViscoelasticModel:
         self.expressions["Tf_partial"] = Expression(
             ufl.as_vector([(
                 self.lambda_m_n_tableau[n] * functions_previous["Tf_partial"][n]
-                + functions_current["T"] * dt * functions["phi"])
-                / (self.lambda_m_n_tableau[n] + dt * functions["phi"])
+                + functions_current["T"] * dt * functions["phi_v"])
+                / (self.lambda_m_n_tableau[n] + dt * functions["phi_v"])
                 for n in range(0,self.tableau_size)]
             ),
              functionSpaces["Tf_partial"].element.interpolation_points()
@@ -136,9 +136,9 @@ class ViscoelasticModel:
 
         # Eq. 9
         self.expressions["thermal_strain"] = Expression(
-            self.I * (self.alpha_solid * (functions_current["T"] - functions_previous["T"])
-                      + (self.alpha_liquid - self.alpha_solid) 
-                      * (functions_current["Tf"] - functions_previous["Tf"])),
+            self.I * (self.alpha_solid * (functions_current["T"])
+                      + ((self.alpha_liquid - self.alpha_solid) 
+                      * (functions_current["Tf"]))),
             functionSpaces["sigma"].element.interpolation_points()
         )
     
@@ -150,8 +150,7 @@ class ViscoelasticModel:
 
         # Eq. 29
         self.expressions["deviatoric_strain"] = Expression(
-            # TODO: Find out if 1/3 applies for all dims
-            (functions["total_strain"] - 1/self.dim * self.I * tr(functions["total_strain"])) ,
+            (functions["total_strain"] - 1/3 * self.I * tr(functions["total_strain"])) ,
             functionSpaces["sigma"].element.interpolation_points()
         )
         
@@ -173,7 +172,7 @@ class ViscoelasticModel:
         )
 
         # Eq. 5
-        self.expressions["phi"] = Expression(
+        self.expressions["phi_current"] = Expression(
             ufl.exp(
                 self.H / self.Rg * (1/self.Tb - 1/functions_current["T"])
             ),
@@ -185,27 +184,26 @@ class ViscoelasticModel:
             ),
             functionSpaces["T"].element.interpolation_points()
         )
-
+        
         # Eq. 19
-        self.expressions["xi"] = Expression(
-            dt/2 * (functions_next["phi"] - functions["phi"]),
+        self.expressions["xi"] = Expression(functions_previous["xi"] + 
+            ((dt/2) * (functions_current["phi"])),
             functionSpaces["T"].element.interpolation_points()
         )
-            
 
         # Eq. 15a + 20
         self.expressions["ds_partial"] = Expression(
             ufl.as_tensor([
-            2.0 * g_n * functions["deviatoric_strain"] * (lambda_g_n/dt) * (1 - ufl.exp(-dt/lambda_g_n))
-                for (lambda_g_n,g_n) in zip(self.lambda_g_n_tableau,self.g_n_tableau)]),
+            2.0 * self.g_n_tableau[n] * functions["deviatoric_strain"] * (self.lambda_g_n_tableau[n]/functions["xi"]) * (1 - ufl.exp(-functions["xi"]/self.lambda_g_n_tableau[n]))
+                for n in range(0,self.tableau_size)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
 
         # Eq. 15b + 20
         self.expressions["dsigma_partial"] = Expression(
-            ufl.as_vector([
-                k_n * (tr(functions["total_strain"])) * (lam_k_n/dt) * (1 - ufl.exp(-dt/lam_k_n))
-                for (lam_k_n,k_n) in zip(self.lambda_k_n_tableau,self.k_n_tableau)]),
+            ufl.as_vector([ 
+            self.k_n_tableau[n] * (tr(functions["total_strain"])) * (self.lambda_k_n_tableau[n]/functions["xi"]) * (1 - ufl.exp(-functions["xi"]/self.lambda_k_n_tableau[n]))
+                for n in range(0,self.tableau_size)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
    
@@ -219,7 +217,7 @@ class ViscoelasticModel:
         # Eq. 16a
         #_, i, j = ufl.indices(3)
         self.expressions["s_tilde_partial_next"] = Expression(ufl.as_tensor([
-            functions_current["s_partial"][n,:,:] * ufl.exp(-dt/self.lambda_g_n_tableau[n])  for n in range(0,self.tableau_size)
+            functions_current["s_partial"][n,:,:] * ufl.exp(-functions["xi"]/self.lambda_g_n_tableau[n])  for n in range(0,self.tableau_size)
         ]),
         functionSpaces["sigma_partial"].element.interpolation_points()
         )
@@ -227,7 +225,7 @@ class ViscoelasticModel:
         # Eq. 16b
         self.expressions["sigma_tilde_partial_next"] = Expression(
             ufl.as_vector([
-                functions_current["sigma_partial"][n] * ufl.exp(-dt/self.lambda_k_n_tableau[n])  for n in range(0,self.tableau_size)
+                functions_current["sigma_partial"][n] * ufl.exp(-functions["xi"]/self.lambda_k_n_tableau[n])  for n in range(0,self.tableau_size)
             ]),
             functionSpaces["Tf_partial"].element.interpolation_points()
         )

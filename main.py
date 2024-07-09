@@ -86,6 +86,7 @@ model.solve()
 
 t_ = np.linspace(start=0.0, stop=50.0, num=500)
 
+#Varabiables in arrays over time loop
 T_ = [AnalyticalSoln.T(t_i, analytical_constants) for t_i in t_]
 phi_ = [AnalyticalSoln.phi(t_i, analytical_constants) for t_i in t_]
 E_ = [AnalyticalSoln.E(t_i, analytical_constants) for t_i in t_]
@@ -95,19 +96,80 @@ sigma_ = [AnalyticalSoln.stress(t_i, analytical_constants) for t_i in t_]
 sigma_analytical_ = [AnalyticalSoln.sigma_analytical(t_i, analytical_constants) for t_i in t_]
 
 
-# Create the plot
-plt.figure(figsize=(10, 6))
+# Temperatures
+fig, axs = plt.subplots(2, 3)
+
+plt.subplot(2, 3, 1)
 plt.plot(t_, T_, label='Analytical results', color='r')
-plt.plot(t_, model.avg_T , label='Simulated results', color='b')
+plt.plot(t_, model.avg_T, label='Simulated results', color='b')
 
 # Add title and labels
-plt.title('Plot of variables vs Time')
+plt.title('Plot of Temperature vs Time')
 plt.xlabel('Time (t)')
-plt.ylabel('variable')
+plt.ylabel('Tempertures (K)')
 
 # Add a legend
 plt.legend()
-
-# Show the plot
 plt.grid(True)
+
+# Shift functions
+plt.subplot(2, 3, 2)
+plt.plot(t_, phi_, label='Analytical results', color='r')
+plt.plot(t_, model.avg_phi, label='Simulated results', color='b')
+
+# Add title and labels
+plt.title('Plot of shift function vs Time')
+plt.xlabel('Time (t)')
+plt.ylabel('Shift function')
+
+# Add a legend
+plt.legend()
+plt.grid(True)
+
+
+#Scaled times
+plt.subplot(2, 3, 3)
+plt.plot(t_, xi_, label='Analytical results', color='r')
+plt.plot(t_, model.avg_xi, label='Simulated results', color='b')
+
+# Add title and labels
+plt.title('Plot of scaled times vs Time')
+plt.xlabel('Time (t)')
+plt.ylabel('Scaled time')
+
+# Add a legend
+plt.legend()
+plt.grid(True)
+
+#Strains
+plt.subplot(2, 3, 4)
+plt.plot(t_, epsilon_, label='Analytical results', color='r')
+plt.plot(t_, model.avg_t_epsilon, label='Simulated results', color='b')
+
+# Add title and labels
+plt.title('Plot of total strains vs Time')
+plt.xlabel('Time (t)')
+plt.ylabel('Total strain')
+
+# Add a legend
+plt.legend()
+plt.grid(True)
+
+#Stresses
+plt.subplot(2, 3, 5)
+plt.plot(t_, sigma_analytical_, label='Analytical results', color='r')
+plt.plot(t_, model.avg_t_sigma, label='Simulated results', color='b')
+
+# Add title and labels
+plt.title('Plot of stresses vs Time')
+plt.xlabel('Time (t)')
+plt.ylabel('Stress (MPa)')
+
+# Add a legend
+plt.legend()
+plt.grid(True)
+
+# Adjust layout
+plt.tight_layout()
 plt.show()
+

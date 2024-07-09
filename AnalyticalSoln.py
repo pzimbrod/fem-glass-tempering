@@ -84,7 +84,8 @@ class AnalyticalSoln():
         A4 = -np.exp(-H * c / (Tb * (H - c)))
         A5 = A2 * np.exp(H / Tb)
 
-        return ((np.exp(  (A5*b*Tb*((a*t_)+b)**A3  ) - (A5*Tb*b**(A3+1))  + (A5*t_*a*Tb*((a*t_)+b)**A3)  - (A2*H*a*lambda_)))  + A4)/A1
+        return ((np.exp(  (A5*b*Tb*((a*t_)+b)**A3  ) - (A5*Tb*b**(A3+1))  + (A5*t_*a*Tb*((a*t_)+b)**A3)  - (A2*H*a*lambda_)))  + A4)/(A1*10**6)
+        # the term is divided by 10**6 in order to convert the units from Pa into MPa 
 
 
 
