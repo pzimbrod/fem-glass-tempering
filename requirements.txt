@@ -72,4 +72,4 @@ wcwidth==0.2.13
 wheel==0.42.0
 wslink==1.12.4
 yarl==1.9.4
-zipp==3.17.0
+zipp==3.19.1
