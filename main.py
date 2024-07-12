@@ -43,20 +43,21 @@ model_params = {
     # Boltzmann constant
     "sigma": 5.670e-8,
     # Ambient temperature
-    "T_ambient": 293.0,
+    "T_ambient": 293.15,
     # Initial temperature
-    "T_0": 923.1,
+    "T_0": 923.15,
     "alpha": 1.0,
     # Convective heat transfer coefficient (Controlling cooling rate)
-    "htc": 280.0,
+    "htc": 280.1,
     # Material density
     "rho": 2500.0,
     # Specific heat capacity
     "cp": 1433.0,
     # Heat conduction coefficient
     "k": 1.0,
-    "H": 457.05e3,
-    "Tb": 869.0e0,
+    "Hv": 457.05e3,
+    "H": 627.8e3,
+    "Tb": 869.0,
     "Rg": 8.314,
     "alpha_solid": 9.10e-6,
     "alpha_liquid": 25.10e-6,
@@ -169,7 +170,27 @@ plt.ylabel('Stress (MPa)')
 plt.legend()
 plt.grid(True)
 
+#Thermal Strains
+plt.subplot(2, 3, 6)
+#plt.plot(t_, epsilon_, label='Analytical results', color='r')
+plt.plot(t_, model.avg_thermal_epsilon, label='Simulated results', color='b')
+
+# Add title and labels
+plt.title('Plot of total strains vs Time')
+plt.xlabel('Time (t)')
+plt.ylabel('Total strain')
+
+# Add a legend
+plt.legend()
+plt.grid(True)
+
 # Adjust layout
 plt.tight_layout()
 plt.show()
 
+#with the same process apply for another ones and see
+#themal strain and total strain are sucessufull
+# convergence happens on 4 only
+# try another integration method of scaled time
+# try another integration method applied in fenics
+# apply the if conditions

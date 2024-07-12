@@ -12,8 +12,6 @@ class ThermalModel:
             Args:
                 - `model_parameters`: dict holding the parameter values
             """
-            
-
             # Right hand side
             self.f = Constant(mesh,ScalarType(model_parameters["f"]))
             self.epsilon = Constant(mesh,ScalarType(model_parameters["epsilon"])) # view factor
