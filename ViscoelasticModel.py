@@ -91,6 +91,9 @@ class ViscoelasticModel:
         # Lame's elasticity parameters
         self.lambda_= Constant(mesh, model_parameters["lambda_"])
         self.mu = Constant(mesh, model_parameters["mu"])
+        self.G0= Constant(mesh, model_parameters["Young's_modulus"]/(2*(1+ model_parameters["Possion_ratio"])))
+        self.K0 = Constant(mesh, model_parameters["Young's_modulus"]/(3*(1- 2*model_parameters["Possion_ratio"])))
+        self.K_inf = Constant(mesh, 0.18*(model_parameters["Young's_modulus"]/(3*(1- 2*model_parameters["Possion_ratio"]))))
         return
     
     def _init_expressions(self,functions: dict, functions_next: dict,
@@ -138,14 +141,13 @@ class ViscoelasticModel:
         # Eq. 9
         self.expressions["thermal_strain"] = Expression(functions_previous["thermal_strain"] + 
             self.I * (self.alpha_solid * (functions_current["T"] - functions_previous["T"])
-                      + ((self.alpha_liquid - self.alpha_solid) 
-                      * (functions_current["Tf"] - functions_previous["Tf"]))),
+                      + ((self.alpha_liquid - self.alpha_solid) * (functions_current["Tf"] - functions_previous["Tf"]))),
             functionSpaces["sigma"].element.interpolation_points()
         )
     
         # Eq. 28
         self.expressions["total_strain"] = Expression(functions_previous["total_strain"] + 
-            (functions["elastic_strain"] - functions_previous["elastic_strain"] ) - (functions["thermal_strain"] - functions_previous["thermal_strain"]),
+            (functions["elastic_strain"] - functions_previous["elastic_strain"]) - (functions["thermal_strain"] - functions_previous["thermal_strain"]),
             functionSpaces["sigma"].element.interpolation_points()
         )
 
@@ -178,17 +180,17 @@ class ViscoelasticModel:
                 self.H / self.Rg * (1/self.Tb - 1/functions_current["T"])
             ),
             functionSpaces["T"].element.interpolation_points()
-        )
-        self.expressions["phi_previous"] = Expression(
+        )     
+        self.expressions["phi_next"] = Expression(
             ufl.exp(
-                self.H / self.Rg * (1/self.Tb - 1/functions_previous["T"])
+                self.H / self.Rg * (1/self.Tb - 1/functions_next["T"])
             ),
             functionSpaces["T"].element.interpolation_points()
         )
         
         # Eq. 19
-        self.expressions["xi"] = Expression(functions_previous["xi"] + 
-            ((dt/2) * (functions_current["phi"] + functions_previous["phi"])),
+        self.expressions["xi"] = Expression(
+            ((dt/2) * (functions_current["phi"] - functions_previous["phi"])),
             functionSpaces["T"].element.interpolation_points()
         )
 
@@ -218,7 +220,7 @@ class ViscoelasticModel:
         # Eq. 16a
         #_, i, j = ufl.indices(3)
         self.expressions["s_tilde_partial_next"] = Expression(ufl.as_tensor([
-            functions_current["s_partial"][n,:,:] * ufl.exp(-functions["xi"]/self.lambda_g_n_tableau[n])  for n in range(0,self.tableau_size)
+            functions_current["s_partial"][n,:,:] * ufl.exp(-(functions["xi"])/self.lambda_g_n_tableau[n])  for n in range(0,self.tableau_size)
         ]),
         functionSpaces["sigma_partial"].element.interpolation_points()
         )
@@ -226,7 +228,7 @@ class ViscoelasticModel:
         # Eq. 16b
         self.expressions["sigma_tilde_partial_next"] = Expression(
             ufl.as_vector([
-                functions_current["sigma_partial"][n] * ufl.exp(-functions["xi"]/self.lambda_k_n_tableau[n])  for n in range(0,self.tableau_size)
+                functions_current["sigma_partial"][n] * ufl.exp(-(functions["xi"])/self.lambda_k_n_tableau[n])  for n in range(0,self.tableau_size)
             ]),
             functionSpaces["Tf_partial"].element.interpolation_points()
         )
@@ -281,7 +283,7 @@ class ViscoelasticModel:
         """
         return  (
             np.sum([1.0/factorial(k)
-            * (- functions["xi"]/lambda_value)**k for k in range(0,3)])
+            * (- (functions["xi"])/lambda_value)**k for k in range(0,3)])
             )
         
     # Eq. 21 -  viscoelastic material stiffness matrix - for 2D 
