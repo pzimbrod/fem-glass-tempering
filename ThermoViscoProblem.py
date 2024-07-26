@@ -54,6 +54,8 @@ class ThermoViscoProblem:
             dt=self.dt)
 
         self.jit_options = jit_options
+        
+        self.create_vtx_files = None
 
         return
     
@@ -175,11 +177,18 @@ class ThermoViscoProblem:
 
     def setup(self, dirichlet_bc: bool = False,
               outfile_name: str = "visco",
-              outfile_name1: str = "stresses") -> None:
+              outfile_name1: str = "stresses",
+              create_vtx_files: bool = True) -> None:
         self._set_initial_condition(temp_value=self.material_model.T_init)
+        self.create_vtx_files = create_vtx_files
+        
         if dirichlet_bc:
             self._set_dirichlet_bc(bc_value=self.material_model.T_ambient)
-        self._write_initial_output(t=self.t)
+        
+        if self.create_vtx_files:
+            self._write_initial_output(t=self.t)
+            print('Create vtx-Files')
+        
         self._setup_weak_form()
         self._setup_solver()
 
@@ -371,7 +380,9 @@ class ThermoViscoProblem:
         self._solve_strains()
         self._solve_shifted_time()
         self._solve_stress()
-        self._write_output()
+        
+        if self.create_vtx_files:
+            self._write_output()
         
         # For some computations, functions_previous["T"] is needed
         # thus, we update only at the end of each timestep
@@ -605,8 +616,9 @@ class ThermoViscoProblem:
         if self.mesh.comm.rank == 0:
             t_end = time()
             print(f"Solve finished in {t_end - t_start} seconds.")
-
-        self._finalize()
+            
+        if self.create_vtx_files:
+            self._finalize()
 
         return
 

@@ -10,16 +10,24 @@ jit_options = {
 # Time domain
 t_start = 0.0
 t_end = 50.0
-time = (0.0, 50.0)
+#time = (0.0, 50.0)
+time = (t_start,t_end)
 
+# Time discretization
 dt = 0.1
+
+# Simulation starting time
 t = t_start
 
+# Create Mesh for Simulation
 mesh_path = "mesh1d.msh"
 create_new_mesh = False
 
 if create_new_mesh:
     create_mesh(path=mesh_path)
+
+# Create VTX Files for visualization in Paraview
+create_vtx_files = False
 
 fe_config = {
     "T":        {"element": "DG", "degree": 1},
@@ -58,5 +66,5 @@ model = ThermoViscoProblem(mesh_path=mesh_path,config=fe_config,
                            time=time,dt=dt,model_parameters=model_params,
                            jit_options=jit_options)
 
-model.setup(dirichlet_bc=False)
+model.setup(dirichlet_bc=False,create_vtx_files = create_vtx_files)
 model.solve()
