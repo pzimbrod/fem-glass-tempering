@@ -67,4 +67,8 @@ model = ThermoViscoProblem(mesh_path=mesh_path,config=fe_config,
                            jit_options=jit_options)
 
 model.setup(dirichlet_bc=False,create_vtx_files = create_vtx_files)
-model.solve()
+result = model.solve()
+
+print(f"Number of elements in OutgoingDto: {result.num_elements()}")
+print(f"Example of data in OutgoingDto: {result.elements[10].stress}")
+print("Code finished")

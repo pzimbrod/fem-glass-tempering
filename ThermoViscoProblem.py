@@ -18,6 +18,7 @@ from math import ceil
 from time import time
 from ViscoelasticModel import ViscoelasticModel
 from ThermalModel import ThermalModel
+from OutgoingDto import OutgoingDto,Elements
 
 
 class ThermoViscoProblem:
@@ -56,6 +57,7 @@ class ThermoViscoProblem:
         self.jit_options = jit_options
         
         self.create_vtx_files = None
+        self.outgoing_dto = OutgoingDto()
 
         return
     
@@ -380,6 +382,8 @@ class ThermoViscoProblem:
         self._solve_strains()
         self._solve_shifted_time()
         self._solve_stress()
+
+        self._append_outgoing_dto()
         
         if self.create_vtx_files:
             self._write_output()
@@ -606,7 +610,7 @@ class ThermoViscoProblem:
         return
 
 
-    def solve(self) -> None:
+    def solve(self) -> OutgoingDto: 
         if self.mesh.comm.rank == 0:
             print("Starting solve")
             t_start = time()
@@ -620,7 +624,7 @@ class ThermoViscoProblem:
         if self.create_vtx_files:
             self._finalize()
 
-        return
+        return self.outgoing_dto
 
 
     def _finalize(self) -> None:
@@ -630,3 +634,17 @@ class ThermoViscoProblem:
         self.outfile_sigma.close()
 
         return
+
+    def _append_outgoing_dto(self) -> None:
+        """ Store the temperature, stress and thickness data in the outgoingDto-"""
+        elem = Elements()
+        elem.time = self.t
+        elem.stress = self.functions_next["sigma"].vector.array.tolist()
+        elem.temperature = self.functions_current["T"].vector.array.tolist()
+        elem.thickness = [0,0,0,0]
+        self.outgoing_dto.append(elem)
+        
+        return
+        
+         
+        
