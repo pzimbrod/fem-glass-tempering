@@ -8,7 +8,7 @@ from math import factorial
 from ufl import (TestFunction,TrialFunction, FiniteElement, TensorElement,
                  VectorElement, grad, inner,
                  CellDiameter, avg, jump,
-                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity,dot, nabla_div)#, ds, dx
+                 Measure, SpatialCoordinate, FacetNormal,inner, tr, sym, Identity,dot, nabla_div, ds, dx)#, ds, dx
 
 
 class ViscoelasticModel:
@@ -94,6 +94,9 @@ class ViscoelasticModel:
         self.G0= Constant(mesh, model_parameters["Young's_modulus"]/(2*(1+ model_parameters["Possion_ratio"])))
         self.K0 = Constant(mesh, model_parameters["Young's_modulus"]/(3*(1- 2*model_parameters["Possion_ratio"])))
         self.K_inf = Constant(mesh, 0.18*(model_parameters["Young's_modulus"]/(3*(1- 2*model_parameters["Possion_ratio"]))))
+        self.stress_zero = Constant(mesh, 0.0)
+        self.x = SpatialCoordinate(mesh)
+        #self.stress_bias = Constant(mesh, [20.0])
         return
     
     def _init_expressions(self,functions: dict, functions_next: dict,
@@ -137,30 +140,47 @@ class ViscoelasticModel:
             functionSpaces["T"].element.interpolation_points()
         )
 
-
+        # Define the strains (assuming some form of strain function for illustration)
+        
+        self.expressions["exx"] = Expression(
+            self.x,
+            functionSpaces["sigma"].element.interpolation_points()
+        )  
+        self.expressions["eyy"] = Expression(
+            self.x,
+            functionSpaces["sigma"].element.interpolation_points()
+        )    
+        
         # Eq. 9
-        self.expressions["thermal_strain"] = Expression(functions_previous["thermal_strain"] + 
+        self.expressions["thermal_strain"] = Expression(
             self.I * (self.alpha_solid * (functions_current["T"] - functions_previous["T"])
                       + ((self.alpha_liquid - self.alpha_solid) * (functions_current["Tf"] - functions_previous["Tf"]))),
             functionSpaces["sigma"].element.interpolation_points()
         )
     
         # Eq. 28
-        self.expressions["total_strain"] = Expression(functions_previous["total_strain"] + 
-            (functions["elastic_strain"] - functions_previous["elastic_strain"]) - (functions["thermal_strain"] - functions_previous["thermal_strain"]),
+        self.expressions["total_strain"] = Expression(
+            (self.I * (functions["volumetric_strain"] - functions_previous["volumetric_strain"])) - (functions["thermal_strain"] - functions_previous["thermal_strain"]),
             functionSpaces["sigma"].element.interpolation_points()
         )
 
         # Eq. 29
-        self.expressions["deviatoric_strain"] = Expression(functions_previous["deviatoric_strain"] + 
-            ((functions["total_strain"] - functions_previous["total_strain"]) - (1/3 * self.I * tr(functions["total_strain"] - functions_previous["total_strain"]))) ,
+        self.expressions["deviatoric_strain"] = Expression(
+            (self.I * (functions["elastic_strain"] - functions_previous["elastic_strain"]) - (1/3 * self.I * (functions["volumetric_strain"] - functions_previous["volumetric_strain"]))) ,
             functionSpaces["sigma"].element.interpolation_points()
         )
         
+        #volumetric strain (assuming linear elasticity) for 1D [0,0], 2D [0,0],[1,1], etc
+        self.expressions["volumetric_strain"] = Expression(
+            self.elastic_epsilon(functions["U"] - functions_previous["U"])[0, 0],
+            functionSpaces["T"].element.interpolation_points()
+        )
+        #elastic strain (assuming linear elasticity)
         self.expressions["elastic_strain"] = Expression(
             self.elastic_epsilon(functions["U"]),
             functionSpaces["sigma"].element.interpolation_points()
-        )
+        )   
+        
         # Summation of elastic loading - curve a in fig. 4
         self.expressions["elastic_stress"] = Expression(
             self.elastic_sigma(functions["U"]),
@@ -187,25 +207,31 @@ class ViscoelasticModel:
             ),
             functionSpaces["T"].element.interpolation_points()
         )
+        self.expressions["phi_previous"] = Expression(
+            ufl.exp(
+                self.H / self.Rg * (1/self.Tb - 1/functions_previous["T"])
+            ),
+            functionSpaces["T"].element.interpolation_points()
+        )
         
         # Eq. 19
         self.expressions["xi"] = Expression(
-            ((dt/2) * (functions_current["phi"] - functions_previous["phi"])),
+            ((dt/2)*(functions_current["phi"] - functions_previous["phi"])),
             functionSpaces["T"].element.interpolation_points()
         )
 
         # Eq. 15a + 20
-        self.expressions["ds_partial"] = Expression(
-            ufl.as_tensor([functions_previous["ds_partial"][n,:,:] +
-            2.0 * self.g_n_tableau[n] * (functions["deviatoric_strain"] - functions_previous["deviatoric_strain"]) * (self.lambda_g_n_tableau[n]/functions["xi"]) * (1 - self._taylor_exponential(functions,self.lambda_g_n_tableau[n]))
+        self.expressions["ds_partial"] = Expression( 
+            ufl.as_tensor([
+            2.0 * self.g_n_tableau[n] * (functions["deviatoric_strain"] - functions_previous["deviatoric_strain"]) * (self.lambda_g_n_tableau[n]/(functions["xi"])) * (1 - self._taylor_exponential(functions,self.lambda_g_n_tableau[n]))
                 for n in range(0,self.tableau_size)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
 
         # Eq. 15b + 20
         self.expressions["dsigma_partial"] = Expression(
-            ufl.as_vector([ functions_previous["dsigma_partial"][n] +
-            self.k_n_tableau[n] * (tr(functions["total_strain"] - functions_previous["total_strain"])) * (self.lambda_k_n_tableau[n]/functions["xi"]) * (1 - self._taylor_exponential(functions,self.lambda_k_n_tableau[n]))
+            ufl.as_vector([
+            self.k_n_tableau[n] * (tr(functions["total_strain"] - functions_previous["total_strain"])) * (self.lambda_k_n_tableau[n]/(functions["xi"])) * (1 - self._taylor_exponential(functions,self.lambda_k_n_tableau[n]))
                 for n in range(0,self.tableau_size)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )
@@ -220,7 +246,7 @@ class ViscoelasticModel:
         # Eq. 16a
         #_, i, j = ufl.indices(3)
         self.expressions["s_tilde_partial_next"] = Expression(ufl.as_tensor([
-            functions_current["s_partial"][n,:,:] * ufl.exp(-(functions["xi"])/self.lambda_g_n_tableau[n])  for n in range(0,self.tableau_size)
+            functions_current["s_partial"][n,:,:] * self._taylor_exponential(functions,self.lambda_g_n_tableau[n])  for n in range(0,self.tableau_size) 
         ]),
         functionSpaces["sigma_partial"].element.interpolation_points()
         )
@@ -228,7 +254,7 @@ class ViscoelasticModel:
         # Eq. 16b
         self.expressions["sigma_tilde_partial_next"] = Expression(
             ufl.as_vector([
-                functions_current["sigma_partial"][n] * ufl.exp(-(functions["xi"])/self.lambda_k_n_tableau[n])  for n in range(0,self.tableau_size)
+                functions_current["sigma_partial"][n] * self._taylor_exponential(functions,self.lambda_k_n_tableau[n])  for n in range(0,self.tableau_size)
             ]),
             functionSpaces["Tf_partial"].element.interpolation_points()
         )
@@ -239,7 +265,7 @@ class ViscoelasticModel:
                     n in range(0,self.tableau_size)]),
             functionSpaces["sigma"].element.interpolation_points()
         )
-        
+    
         # Eq. 17a
         self.expressions["s_partial_next"] = Expression(ufl.as_tensor([
             (functions["ds_partial"][n,:,:] - functions_previous["ds_partial"][n,:,:]) + functions_next["s_tilde_partial"][n,:,:] for
@@ -260,6 +286,8 @@ class ViscoelasticModel:
                     n in range(0,self.tableau_size)]),
             functionSpaces["sigma"].element.interpolation_points()
         )
+        # sum of all sigma_next for each time step must be zero
+        # Equation to enforce the sum of stresses at each time step to be zero
         
         self.expressions["A"] = Expression(
             (1/3) * np.sum([g_n *  (lambda_g_n/dt) * (1 - ufl.exp(-dt/lambda_g_n))
@@ -275,7 +303,7 @@ class ViscoelasticModel:
 
         return
 
-    def _taylor_exponential(self,functions: dict, lambda_value):
+    def _taylor_exponential(self,functions:dict, lambda_value):
         """
         A taylor series expression to replace an exponential
         in order to avoid singularities,

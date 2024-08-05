@@ -15,7 +15,7 @@ jit_options = {
 # Time domain
 t_start = 0.0
 t_end = 50.0
-time = (0.0, 50.0)
+time = (t_start, t_end)
 
 dt = 0.1
 t = t_start
@@ -87,7 +87,7 @@ model.solve()
 
 t_ = np.linspace(start=0.0, stop=50.0, num=500)
 
-#Varabiables of analytical equations in arrays over time loop
+#Variables of analytical equations in arrays over time loop
 
 T_ = [AnalyticalSoln.T(t_i, analytical_constants) for t_i in t_]
 phi_ = [AnalyticalSoln.phi(t_i, analytical_constants) for t_i in t_]
@@ -96,7 +96,6 @@ xi_ = [AnalyticalSoln.xi(t_i, analytical_constants) for t_i in t_]
 epsilon_ = [AnalyticalSoln.epsilon(t_i, analytical_constants) for t_i in t_]
 sigma_ = [AnalyticalSoln.stress(t_i, analytical_constants) for t_i in t_]
 sigma_analytical_ = [AnalyticalSoln.sigma_analytical(t_i, analytical_constants) for t_i in t_]
-
 
 fig, axs = plt.subplots(2, 3)
 
@@ -159,8 +158,21 @@ plt.xlabel('Time (t)')
 plt.ylabel('Thermal strain')
 plt.legend()
 plt.grid(True)'''
-
+ 
 # Adjust layout
 plt.tight_layout()
 plt.show()
 
+# lesson learned try write on chat gbt, if i have sigma = ... and s=.. i want to visulaze stresses, where resultant stresses = 0
+# contruct mechanical strains (where 2*exx + eyy)
+# how to calculate volumetric strains numerically and mathematically, it depends on distance and length.
+# name volumteric strains and elastic strains as strain tensors
+# try chatgpt for the grenz code
+# try all sum of all stress at each time step equals zero
+# the solution decreasing not increasing, i suggest to have a look on assign process
+# first two weights are working the other not working
+#read convergence in Nielson and the reference 13 and 14
+#strain values are too small, so we have to make the larger
+#apply the lamdathermal and cp on the nielson paper
+# change to grenzbach parameters and look at numerical simulations artikel
+#construct spatial BC for thermal equations
