@@ -1,6 +1,5 @@
 import gmsh
-
-def create_mesh(path: str, dim: int):
+def create_mesh(path: str, dim: int, Zones:str):
     gmsh.initialize()
     gmsh.model.add(f"Glass {dim}D mesh")
 

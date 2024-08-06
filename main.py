@@ -19,7 +19,13 @@ time = (t_start, t_end)
 
 dt = 0.1
 t = t_start
+
+# Problem dimensions (1D, 2D, or 3D)
 problem_dim = 1
+
+# Name of the glass zone to be used for the simulation
+Zone_name = "Zone_F1"
+
 
 mesh_path = f"mesh{problem_dim}d.msh"
 
@@ -27,7 +33,7 @@ mesh_path = f"mesh{problem_dim}d.msh"
 create_new_mesh = True
 
 if create_new_mesh:
-    create_mesh(path=mesh_path,dim=problem_dim)
+    create_mesh(path=mesh_path,dim=problem_dim,Zones=Zone_name)
 
 fe_config = {
     "T":        {"element": "DG", "degree": 1},
@@ -173,6 +179,6 @@ plt.show()
 # first two weights are working the other not working
 #read convergence in Nielson and the reference 13 and 14
 #strain values are too small, so we have to make the larger
-#apply the lamdathermal and cp on the nielson paper
+# apply the lamdathermal and cp on the nielson paper
 # change to grenzbach parameters and look at numerical simulations artikel
-#construct spatial BC for thermal equations
+# construct spatial BC for thermal equations

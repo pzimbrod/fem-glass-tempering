@@ -1,4 +1,4 @@
-from dolfinx.mesh import locate_entities_boundary
+from dolfinx.mesh import locate_entities_boundary, meshtags
 from mpi4py import MPI
 from dolfinx import fem, io
 from dolfinx.nls import petsc
@@ -67,6 +67,14 @@ class ThermoViscoProblem:
         if self.dim == 2:
             self.bc_markers["top"]      = self.facet_tags.find(11)
             self.bc_markers["bottom"]   = self.facet_tags.find(13)
+        if self.dim == 3:
+            self.bc_markers["front"]     = self.facet_tags.find(1)
+            self.bc_markers["back"]      = self.facet_tags.find(15)
+            self.bc_markers["left"]   = self.facet_tags.find(13)
+            self.bc_markers["right"]       = self.facet_tags.find(11)
+            self.bc_markers["top"]     = self.facet_tags.find(12)
+            self.bc_markers["bottom"]    = self.facet_tags.find(12)
+            
 
         return
     
@@ -364,8 +372,29 @@ class ThermoViscoProblem:
     # Heat diffusion equation #
 
     def _setup_weak_form_T(self) -> None:
-        
-        ds = Measure("exterior_facet",domain=self.mesh)
+        # Define the left boundary (x = 0)
+        def left_boundary(x):
+            return np.isclose(x[0], 0.0)
+
+        # Define the right boundary (x = L)
+        def right_boundary(x):
+            return np.isclose(x[0], 50)
+
+        # Mark boundaries
+        facet_indices, facet_markers = [], []
+        boundary_facets_left = locate_entities_boundary(self.mesh, dim=0, marker=left_boundary)
+        boundary_facets_right = locate_entities_boundary(self.mesh, dim=0, marker=right_boundary)
+
+        # Add left boundary (1) and right boundary (2) markers
+        facet_indices.extend(boundary_facets_left)
+        facet_markers.extend([1] * len(boundary_facets_left))
+        facet_indices.extend(boundary_facets_right)
+        facet_markers.extend([2] * len(boundary_facets_right))
+
+        facet_tags = meshtags(self.mesh, 0, np.array(facet_indices, dtype=np.int32), np.array(facet_markers, dtype=np.int32))
+
+        # Measure for the left (ds(1)) and right (ds(2)) boundaries
+        ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tags)
         dx = Measure("dx",domain=self.mesh)
 
         element_type = self.finiteElements["T"].family()
@@ -381,28 +410,31 @@ class ThermoViscoProblem:
         #cp = self.physical_model.cp
         #k = self.physical_model.k
         
-        # thermal conductivity - Eq.B1
+        " Thermal conductivity - Eq.B1 "
         def kth(T):
             return 0.741 + (T * 8.58e-4)
         
-        # Heat capacity - Eq.B1
+        " Heat capacity - Eq.B1 "
         def Cp(T):  
             return conditional(ge(T, 850),
                                 1433 + (6.5e-3 * T),
                                 893 + (0.4 * T) - (18 * 10e-8 * T**-2))
 
+        "Using implicit euler scheme "
         self.F = (
             # Mass Matrix
             (self.functions_current["T"] - self.functions_previous["T"]) * self.v * dx
             + self.dt * (
             # Laplacian
-            + alpha * inner(grad(self.functions_current["T"]),grad(self.v)) * dx
+            + kth(self.functions_current["T"]/(rho*Cp(self.functions_current["T"])))*inner(grad(self.functions_current["T"]),grad(self.v)) * dx
             # Right hand side
-            - f * self.v * dx
+            - (f/rho*Cp(self.functions_current["T"])) * self.v * dx
             # Radiation
-            + 0.0001 * (sigma * epsilon) * (self.functions_current["T"]**4 - T_ambient**4) * self.v * ds
+            + (sigma * epsilon/(rho*Cp(self.functions_current["T"]))) * (self.functions_current["T"]**4 - T_ambient**4) * self.v * ds(1)
+            + (sigma * epsilon/(rho*Cp(self.functions_current["T"]))) * (self.functions_current["T"]**4 - T_ambient**4) * self.v * ds(2)
             # Convection
-            + 0.0001 * (htc) * (self.functions_current["T"] - T_ambient) * self.v * ds
+            + (htc/(rho*Cp(self.functions_current["T"]))) * (self.functions_current["T"] - T_ambient) * self.v * ds(1)
+            + (htc/(rho*Cp(self.functions_current["T"]))) * (self.functions_current["T"] - T_ambient) * self.v * ds(2)
             )
         )
 
@@ -446,7 +478,7 @@ class ThermoViscoProblem:
         self.ksp.setFromOptions()
         
     # linear elasticity equation #
-    
+
     def _set_dirichlet_bc_mech(self) -> None:
           
         facet_dim = self.mesh.topology.dim-1
