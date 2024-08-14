@@ -1,7 +1,48 @@
+import typing
+from pathlib import Path
+
+import basix
+import basix.ufl
+from dolfinx import cpp as _cpp
+from dolfinx import default_real_type
+from dolfinx.cpp.graph import AdjacencyList_int32
+from dolfinx.io.utils import distribute_entity_data
+from dolfinx.mesh import CellType, Mesh, create_mesh, meshtags, meshtags_from_entities
+
+from dolfinx.io import gmshio
+from mpi4py import MPI
 import gmsh
 
+# Overwrite the gmshio.read_from_msh() function 
+def read_from_msh(
+    filename: typing.Union[str, Path],
+    comm: MPI.Comm,
+    rank: int = 0,
+    gdim: int = 3,
+    partitioner: typing.Optional[
+        typing.Callable[[MPI.Comm, int, int, AdjacencyList_int32], AdjacencyList_int32]
+    ] = None,
+) -> tuple[Mesh, _cpp.mesh.MeshTags_int32, _cpp.mesh.MeshTags_int32]:
+    try:
+        import gmsh
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "No module named 'gmsh': dolfinx.io.gmshio.read_from_msh requires Gmsh.", name="gmsh"
+        )
+
+    if comm.rank == rank:
+        gmsh.initialize(interruptible=False)
+        gmsh.model.add("Mesh from file")
+        gmsh.merge(str(filename))
+        msh = gmshio.model_to_mesh(gmsh.model, comm, rank, gdim=gdim, partitioner=partitioner)
+        gmsh.finalize()
+        return msh
+    else:
+        return gmshio.model_to_mesh(gmsh.model, comm, rank, gdim=gdim, partitioner=partitioner)
+
+
 def create_mesh(path: str):
-    gmsh.initialize()
+    gmsh.initialize(interruptible=False)
     gmsh.model.add("Glass 1D mesh")
 
     resolution_fine = 0.1

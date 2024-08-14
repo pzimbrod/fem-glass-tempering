@@ -19,7 +19,11 @@ from time import time
 from ViscoelasticModel import ViscoelasticModel
 from ThermalModel import ThermalModel
 from OutgoingDto import OutgoingDto,Elements
+from geometry import read_from_msh
+import logging
 
+gmshio.read_from_msh = read_from_msh
+logger = logging.getLogger("__main__")
 
 class ThermoViscoProblem:
     def __init__(self,mesh_path: str,time: tuple, dt: float,
@@ -58,6 +62,7 @@ class ThermoViscoProblem:
         
         self.create_vtx_files = None
         self.outgoing_dto = OutgoingDto()
+        self.execution_time = None
 
         return
     
@@ -189,7 +194,8 @@ class ThermoViscoProblem:
         
         if self.create_vtx_files:
             self._write_initial_output(t=self.t)
-            print('Create vtx-Files')
+            #print('Create vtx-Files')
+            logger.debug('Create vtx-Files')
         
         self._setup_weak_form()
         self._setup_solver()
@@ -376,7 +382,8 @@ class ThermoViscoProblem:
     
 
     def solve_timestep(self,t) -> None:
-        print(f"t={self.t}")
+        #print(f"t={self.t}")
+        logger.debug(f"t={self.t}")
         self._solve_T()
         self._solve_Tf()
         self._solve_strains()
@@ -612,14 +619,17 @@ class ThermoViscoProblem:
 
     def solve(self) -> OutgoingDto: 
         if self.mesh.comm.rank == 0:
-            print("Starting solve")
+            #print("Starting solve")
+            logger.debug("Starting solve")
             t_start = time()
         for _ in range(self.n_steps):
             self.t += self.dt
             self.solve_timestep(t=self.t)
         if self.mesh.comm.rank == 0:
             t_end = time()
-            print(f"Solve finished in {t_end - t_start} seconds.")
+            #print(f"Solve finished in {t_end - t_start} seconds.")
+            logger.debug(f"Solve finished in {t_end - t_start} seconds.")
+            self.execution_time = t_end - t_start
             
         if self.create_vtx_files:
             self._finalize()
