@@ -6,37 +6,36 @@ from AnalyticalSoln import AnalyticalSoln
 
 
 
+
 # Enable full compiler optimizations for generated
 # C++ code
 jit_options = {
             "cffi_extra_compile_args": ["-O3", "-march=native"]
         }
 
-# Time domain
+# Time domain (whole time domain or for each zone)
 t_start = 0.0
-t_end = 50.0
+t_end = 20.0
 time = (t_start, t_end)
 
 dt = 0.1
 t = t_start
 
 # Problem dimensions (1D, 2D, or 3D)
-problem_dim = 1
+problem_dim = 3
 
-# Name of the glass zone to be used for the simulation
-Zone_name = "Zone_F1"
-
+# Name of the glass zone 
+Zone_name = "all"
 
 mesh_path = f"mesh{problem_dim}d.msh"
-
 
 create_new_mesh = True
 
 if create_new_mesh:
-    create_mesh(path=mesh_path,dim=problem_dim,Zones=Zone_name)
+    create_mesh(path=mesh_path,dim=problem_dim, name=Zone_name, t_start=t_start, t_end=t_end)
 
 fe_config = {
-    "T":        {"element": "DG", "degree": 1},
+    "T":        {"element": "CG", "degree": 1},
     "sigma":    {"element": "CG", "degree": 1},
     "U":        {"element": "CG", "degree": 1}
 }
@@ -52,7 +51,7 @@ model_params = {
     "T_ambient": 293.15,
     # Initial temperature
     "T_0": 923.15,
-    "alpha": 1.0, #ideal 2
+    "alpha": 40.0,    #ideal 2
     # Convective heat transfer coefficient (Controlling cooling rate)
     "htc": 280.1,
     # Material density
@@ -85,23 +84,23 @@ analytical_constants = {
         "lambda_":   0.7012,
         }
 model = ThermoViscoProblem(mesh_path=mesh_path,problem_dim=problem_dim,
-                           config=fe_config,time=time,dt=dt,model_parameters=model_params,
+                           config=fe_config,time=time,dt=dt,model_parameters=model_params, analy_parameters=analytical_constants,
                            jit_options=jit_options)
 
-model.setup(dirichlet_bc_mech=True)
+model.setup(dirichlet_bc_mech=False)
 model.solve()
 
-t_ = np.linspace(start=0.0, stop=50.0, num=500)
+'''t_ = np.linspace(start=0.0, stop=150.0, num=1500)
 
 #Variables of analytical equations in arrays over time loop
 
-T_ = [AnalyticalSoln.T(t_i, analytical_constants) for t_i in t_]
-phi_ = [AnalyticalSoln.phi(t_i, analytical_constants) for t_i in t_]
-E_ = [AnalyticalSoln.E(t_i, analytical_constants) for t_i in t_]
-xi_ = [AnalyticalSoln.xi(t_i, analytical_constants) for t_i in t_]
-epsilon_ = [AnalyticalSoln.epsilon(t_i, analytical_constants) for t_i in t_]
-sigma_ = [AnalyticalSoln.stress(t_i, analytical_constants) for t_i in t_]
-sigma_analytical_ = [AnalyticalSoln.sigma_analytical(t_i, analytical_constants) for t_i in t_]
+T_ = [AnalyticalSoln .T(t_i, constants=analytical_constants) for t_i in t_]
+phi_ = [AnalyticalSoln.phi(t_i, constants=analytical_constants) for t_i in t_]
+E_ = [AnalyticalSoln.E(t_i, constants=analytical_constants) for t_i in t_]
+xi_ = [AnalyticalSoln.xi(t_i, constants=analytical_constants) for t_i in t_]
+epsilon_ = [AnalyticalSoln.epsilon(t_i, constants=analytical_constants) for t_i in t_]
+sigma_ = [AnalyticalSoln.stress(t_i, constants=analytical_constants) for t_i in t_]
+sigma_analytical_ = [AnalyticalSoln.sigma_analytical(t_i, constants=analytical_constants) for t_i in t_]
 
 fig, axs = plt.subplots(2, 3)
 
@@ -156,29 +155,16 @@ plt.legend()
 plt.grid(True)
 
 #Thermal Strains
-'''plt.subplot(2, 3, 6)
+plt.subplot(2, 3, 6)
 #plt.plot(t_, epsilon_, label='Analytical results', color='r')
 plt.plot(t_, model.avg_thermal_epsilon, label='Simulated results', color='b')
 plt.title('Plot of thermal strains vs Time')
 plt.xlabel('Time (t)')
 plt.ylabel('Thermal strain')
 plt.legend()
-plt.grid(True)'''
- 
+plt.grid(True)
+
 # Adjust layout
 plt.tight_layout()
 plt.show()
-
-# lesson learned try write on chat gbt, if i have sigma = ... and s=.. i want to visulaze stresses, where resultant stresses = 0
-# contruct mechanical strains (where 2*exx + eyy)
-# how to calculate volumetric strains numerically and mathematically, it depends on distance and length.
-# name volumteric strains and elastic strains as strain tensors
-# try chatgpt for the grenz code
-# try all sum of all stress at each time step equals zero
-# the solution decreasing not increasing, i suggest to have a look on assign process
-# first two weights are working the other not working
-#read convergence in Nielson and the reference 13 and 14
-#strain values are too small, so we have to make the larger
-# apply the lamdathermal and cp on the nielson paper
-# change to grenzbach parameters and look at numerical simulations artikel
-# construct spatial BC for thermal equations
+'''

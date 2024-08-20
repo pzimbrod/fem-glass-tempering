@@ -35,7 +35,7 @@ class AnalyticalSoln():
     def xi(t_: float, constants:dict):
         """Integrate the scaled time by quadrature integration,
         Eq. 3 """
-        scaled_time, _ = quad(lambda t_: AnalyticalSoln.phi(AnalyticalSoln.T(t_, constants), constants), 0, t_)
+        scaled_time, _ = quad(lambda t_: AnalyticalSoln.phi(t_, constants), 0, t_)
         return scaled_time
 
     def epsilon(t_: float, constants:dict):
