@@ -153,7 +153,7 @@ class ViscoelasticModel:
     
         # Eq. 28
         self.expressions["total_strain"] = Expression(
-            self.I*((functions["volumetric_strain"])- (functions["thermal_strain"])),
+            self.I*((functions["volumetric_strain"]) - (functions["thermal_strain"])),
             functionSpaces["T"].element.interpolation_points()
         )
         # Eq. 29 (diagnoals + off-diagonals of the deviatoric strain)
@@ -165,7 +165,7 @@ class ViscoelasticModel:
 
         #volumetric strain (assuming linear elasticity) for 1D exx = [0,0], 2D (exx+eyy)= ([0,0]+[1,1])/2, etc, it is also called sum of direct strains
         self.expressions["volumetric_strain"] = Expression(
-            0.5 *(self.elastic_epsilon(functions["U"])[0, 0] + self.elastic_epsilon(functions["U"])[1, 1]),
+            (self.elastic_epsilon(functions["U"])[0, 0] + self.elastic_epsilon(functions["U"])[1, 1]),
             functionSpaces["T"].element.interpolation_points()
         )
         #elastic strain (assuming linear elasticity)
@@ -216,7 +216,7 @@ class ViscoelasticModel:
         # Eq. 15a + 20
         self.expressions["ds_partial"] = Expression(
             ufl.as_tensor([
-            2.0 * self.g_n_tableau[n] * ((self.elastic_epsilon(functions["U"])) - (self.I * 0.5 *(functions["volumetric_strain"]))) * (self.lambda_g_n_tableau[n]/(dt)) * (1 - ufl.exp(-(dt)/self.lambda_g_n_tableau[n]))
+            2.0 * self.g_n_tableau[n] * ((self.elastic_epsilon(functions["U"])) - (self.I * (functions["volumetric_strain"]))) * (self.lambda_g_n_tableau[n]/(dt)) * (1 - ufl.exp(-(dt)/self.lambda_g_n_tableau[n]))
                 for n in range(0,self.tableau_size)]),
             functionSpaces["sigma_partial"].element.interpolation_points()
         )

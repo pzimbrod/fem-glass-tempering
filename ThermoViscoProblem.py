@@ -3,6 +3,7 @@ from mpi4py import MPI
 from dolfinx import fem, io
 from dolfinx.nls import petsc
 from dolfinx.io import gmshio
+from dolfinx.geometry import BoundingBoxTree, compute_closest_entity
 from dolfinx.fem import (FunctionSpace, Function, Constant, locate_dofs_geometrical, locate_dofs_topological)
 from dolfinx.fem.petsc import NonlinearProblem, apply_lifting, assemble_matrix, assemble_vector, set_bc
 from ufl import (TestFunction,TrialFunction, FiniteElement, TensorElement,
@@ -69,8 +70,8 @@ class ThermoViscoProblem:
             self.bc_markers["right"]    = self.facet_tags.find(12)
         elif self.dim == 2:
             self.bc_markers["left"]     = self.facet_tags.find(10)
-            self.bc_markers["right"]    = self.facet_tags.find(12)
             self.bc_markers["top"]      = self.facet_tags.find(11)
+            self.bc_markers["right"]    = self.facet_tags.find(12)
             self.bc_markers["bottom"]   = self.facet_tags.find(13)
         elif self.dim == 3:
             self.bc_markers["front"]     = self.facet_tags.find(10)
@@ -242,8 +243,8 @@ class ThermoViscoProblem:
         self._write_initial_output(t=self.t)
         self._setup_weak_form_T()
         self._setup_solver_T()
-        #self._setup_weak_form_u()
-        #self._setup_solver_u()
+        self._setup_weak_form_u()
+        self._setup_solver_u()
 
 
     def _set_initial_condition(self, temp_value: float) -> None:
@@ -372,10 +373,10 @@ class ThermoViscoProblem:
 
         # Mark boundaries
         facet_indices, facet_markers = [], []
-        boundary_facets_left = locate_entities_boundary(self.mesh, dim=1, marker=left_boundary)
-        boundary_facets_right = locate_entities_boundary(self.mesh, dim=1, marker=right_boundary)
-        boundary_facets_top = locate_entities_boundary(self.mesh, dim=1, marker=top_boundary)
-        boundary_facets_bottom = locate_entities_boundary(self.mesh, dim=1, marker=bottom_boundary)
+        boundary_facets_left = locate_entities_boundary(self.mesh, dim=0, marker=left_boundary)
+        boundary_facets_right = locate_entities_boundary(self.mesh, dim=0, marker=right_boundary)
+        boundary_facets_top = locate_entities_boundary(self.mesh, dim=0, marker=top_boundary)
+        boundary_facets_bottom = locate_entities_boundary(self.mesh, dim=0, marker=bottom_boundary)
 
         # Combine facet indices and assign markers
         facet_indices = np.concatenate([boundary_facets_left, boundary_facets_right, boundary_facets_bottom, boundary_facets_top])
@@ -387,10 +388,10 @@ class ThermoViscoProblem:
         ])
 
         # Create MeshTags object for boundary facets (dim=1)
-        facet_tags = meshtags(self.mesh, 2, facet_indices, facet_markers)
+        facet_tags = meshtags(self.mesh, 0, facet_indices, facet_markers)
 
         # Measure for the left (ds(1)) and right (ds(2)) boundaries
-        ds = Measure("ds", domain=self.mesh, subdomain_data=facet_tags)
+        ds = Measure("exterior_facet", domain=self.mesh)
         dx = Measure("dx",domain=self.mesh)
 
         element_type = self.finiteElements["T"].family()
@@ -495,9 +496,8 @@ class ThermoViscoProblem:
         dx = Measure("dx", domain=self.mesh)
         x = SpatialCoordinate(self.mesh)
         
-        self.ss = ufl.as_vector((0.0, -x[1]))  # body force as a gravity vector
+        self.ss = ufl.as_vector((0.0,-30))  # body force as a gravity vector
         self.traction = Constant(self.mesh, ScalarType((0.0, 0.0))) # traction force
-
 
         # Weak form: Standard elasticity problem
         self.a = inner(self.material_model.elastic_sigma(self.u_trial), self.material_model.elastic_epsilon(self.v_test)) * dx
@@ -531,7 +531,7 @@ class ThermoViscoProblem:
         print(f"t={t}")
         self._solve_T()
         self._solve_Tf()
-        #self._solve_u()
+        self._solve_u()
         self._solve_strains()
         self._solve_shifted_time()
         self._solve_stress()
@@ -544,6 +544,8 @@ class ThermoViscoProblem:
         self.avg_t_epsilon.append([np.average(self.functions["total_strain"].x.array[:])])
         self.avg_t_sigma.append([np.average(self.functions_next["sigma"].x.array[:])])
         self._write_output()
+
+        
         
         # For some computations, functions_previous["T"] and functions_previous["displacement"] is needed
         # thus, we update only at the end of each timestep
@@ -572,11 +574,21 @@ class ThermoViscoProblem:
     
     def _to_np_arrays(self,t) -> None:
         """
-        Convert the fenics functions into np.arrays 
+        Convert the fenics functions into numpy arrays 
         for easier avalibility
         """  
-        T_array= self.functions_current["T"].vector.array
-        self.temperature_time_array.append(f"t={t:.1f} \nT={T_array.tolist()}\n")
+        nx=50
+        ny=10
+        s_array= self.functions_next["sigma"].x.array[:]
+        self.temperature_time_array.append(f"t={t:.1f} \nT={s_array.tolist()}\n")
+        # 4 tensor components, nodes at x position and y position
+        s_array_reshaped = s_array.reshape((4, (nx+1), (ny+1)))
+        # Extract sigma_xx as the first component
+        self.sigma_xx = s_array_reshaped[0,:,:]
+        #extract the mid_plane
+        print(self.sigma_xx[:,2])
+        self.avg_t_sigma_mid.append([np.average(self.sigma_xx[25,:])])
+        
 
         return
 
@@ -838,11 +850,11 @@ class ThermoViscoProblem:
         self.avg_thermal_epsilon= []
         self.avg_t_epsilon= []
         self.avg_t_sigma= []
+        self.avg_t_sigma_mid= []
         self.temperature_time_array = []
         if self.mesh.comm.rank == 0:
             print("Starting solve")
             t_start = time()
-            
         for _ in range(self.n_steps):
             self.t += self.dt
             self.solve_timestep(t=self.t)

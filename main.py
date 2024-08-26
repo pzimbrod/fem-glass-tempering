@@ -15,14 +15,14 @@ jit_options = {
 
 # Time domain (whole time domain or for each zone)
 t_start = 0.0
-t_end = 20.0
+t_end = 10.0
 time = (t_start, t_end)
 
 dt = 0.1
 t = t_start
 
 # Problem dimensions (1D, 2D, or 3D)
-problem_dim = 3
+problem_dim = 2
 
 # Name of the glass zone 
 Zone_name = "all"
@@ -82,15 +82,17 @@ analytical_constants = {
         "H":    22.380e3,
         "k":    -1.231e8,
         "lambda_":   0.7012,
-        }
+}
+
 model = ThermoViscoProblem(mesh_path=mesh_path,problem_dim=problem_dim,
                            config=fe_config,time=time,dt=dt,model_parameters=model_params, analy_parameters=analytical_constants,
                            jit_options=jit_options)
 
-model.setup(dirichlet_bc_mech=False)
+model.setup(dirichlet_bc_mech=True)
 model.solve()
 
-'''t_ = np.linspace(start=0.0, stop=150.0, num=1500)
+
+t_ = np.linspace(start=0.0, stop=10, num=100)
 
 #Variables of analytical equations in arrays over time loop
 
@@ -147,7 +149,7 @@ plt.grid(True)
 #Stresses
 plt.subplot(2, 3, 5)
 plt.plot(t_, sigma_analytical_, label='Analytical results', color='r')
-plt.plot(t_, model.avg_t_sigma, label='Simulated results', color='b')
+plt.plot(t_, model.avg_t_sigma_mid, label='Simulated results', color='b')
 plt.title('Plot of stresses vs Time')
 plt.xlabel('Time (t)')
 plt.ylabel('Stress (MPa)')
@@ -167,4 +169,27 @@ plt.grid(True)
 # Adjust layout
 plt.tight_layout()
 plt.show()
-'''
+
+
+# convert numpy arrays into a fenics function, ask chatgbt
+# try again in 1D model of the body forces, and how is imported as a vector in linear elasticity problem
+# try the middle option(point)
+
+
+#gmsh
+# thickness is defined through points
+# resolution defines how many nodes 
+# without tages for BC, gives me exact number of elements = nodes -1
+#thickness = 5.0 #units m , while the nodes represents the resolution level of mesh
+# try do construct mid points in order to get exact number of nodes and elements
+#Transfinite Surface: gmsh.model.mesh.setTransfiniteSurface(plane_surface) ensures that the mesh is regular and structured, giving predictable element distribution.
+# apply transfinite on 1D and 3D
+
+#todo make sure of a tool to arrange the points well try .dof and .mesh_coordina.. and others
+
+
+
+#anmerkungen: boundaries increase elemnents not the nodes
+# 2D mesh is done and temperatures at [25, :] is done
+# apply for stresses to plot simulated stresses against analytical ones
+# to determine the thickness at each node self.mesh.geometry.x
