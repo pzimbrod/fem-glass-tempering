@@ -648,10 +648,10 @@ class ThermoViscoProblem:
     def _append_outgoing_dto(self) -> None:
         """ Store the temperature, stress and thickness data in the outgoingDto-"""
         elem = Elements()
-        elem.time = self.t
-        elem.stress = self.functions_next["sigma"].vector.array.tolist()
-        elem.temperature = self.functions_current["T"].vector.array.tolist()
-        elem.thickness = [0,0,0,0]
+        elem.Time = self.t
+        elem.Stress = self.functions_next["sigma"].vector.array.tolist()
+        elem.Temperature = self.functions_current["T"].vector.array.tolist()
+        elem.Thickness = None
         self.outgoing_dto.append(elem)
         
         return
